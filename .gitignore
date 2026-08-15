@@ -1,0 +1,23 @@
+# Secrets
+.env
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+build/
+dist/
+.venv/
+
+# uv.lock IS tracked, so CI resolves the same versions this was developed against.
+
+# Editor
+.vscode/*
+!.vscode/extensions.json
+.idea/
+
+# Local run state
+.o/

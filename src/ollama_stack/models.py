@@ -1,0 +1,39 @@
+"""The routing table, kept in one place because model names have already drifted twice."""
+
+from __future__ import annotations
+
+from dataclasses import dataclass
+
+DEFAULT_NUM_CTX = 32768
+
+
+@dataclass(frozen=True)
+class ModelSpec:
+    """One routable model and what it is for."""
+
+    tag: str
+    summary: str
+    measured: bool
+
+
+REGISTRY: dict[str, ModelSpec] = {
+    "qwen": ModelSpec("qwen3.8:27b", "primary daily driver, vision, 256K advertised", False),
+    "coder": ModelSpec("qwen3-coder:30b", "agentic coding; the only measured implementer", True),
+    "dev": ModelSpec("devstral:24b", "multi-file agentic work", False),
+    "think": ModelSpec("deepseek-r1:32b", "open-ended reasoning, NOT defect hunting", True),
+    "gem": ModelSpec("gemma4:26b", "vision, general chat", False),
+    "deepseek": ModelSpec("deepseek-coder-v2:16b-lite-instruct", "quick code snippets", False),
+    "qwen36": ModelSpec("qwen3.6:27b", "previous daily driver, kept for A/B", False),
+}
+
+DEFAULT_ALIAS = "qwen"
+
+
+def resolve(name: str) -> ModelSpec:
+    """Turn an alias or a raw Ollama tag into a spec, preferring aliases."""
+    if name in REGISTRY:
+        return REGISTRY[name]
+    for spec in REGISTRY.values():
+        if spec.tag == name:
+            return spec
+    return ModelSpec(name, "not in the registry", False)

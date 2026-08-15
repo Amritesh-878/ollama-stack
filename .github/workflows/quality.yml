@@ -1,0 +1,34 @@
+# This is the only gate that cannot be talked out of running. The verify-quality skill and
+# the Task Auditor both depend on an agent choosing to comply; this does not.
+
+name: quality
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  python:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      # --frozen fails on a stale lockfile rather than silently resolving something else.
+      - name: Install
+        run: uv sync --frozen --all-extras
+
+      # Order is mandatory: lint, then typecheck, then tests. Never tests first.
+      - name: Lint
+        run: uv run ruff check .
+
+      - name: Typecheck
+        run: uv run mypy .
+
+      - name: Tests
+        run: uv run pytest

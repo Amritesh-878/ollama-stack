@@ -1,0 +1,44 @@
+[project]
+name = "ollama-stack"
+version = "0.1.0"
+description = "Local-model toolchain: one Ollama client, a CLI, an implementation harness, and a screening pass."
+requires-python = ">=3.12"
+dependencies = [
+    "typer>=0.15.0",
+    "requests>=2.32.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.3.0",
+    "mypy>=1.13.0",
+    "ruff>=0.8.0",
+    "types-requests>=2.32.0",
+    "responses>=0.25.0",
+]
+
+[project.scripts]
+o = "ollama_stack.cli:app"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/ollama_stack"]
+
+[tool.ruff]
+line-length = 100
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "N", "UP", "B", "SIM", "RUF"]
+
+[tool.mypy]
+python_version = "3.12"
+strict = true
+files = ["src", "tests"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
