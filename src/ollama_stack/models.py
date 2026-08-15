@@ -22,7 +22,9 @@ REGISTRY: dict[str, ModelSpec] = {
     "dev": ModelSpec("devstral:24b", "multi-file agentic work", False),
     "think": ModelSpec("deepseek-r1:32b", "open-ended reasoning, NOT defect hunting", True),
     "gem": ModelSpec("gemma4:26b", "vision, general chat", False),
-    "deepseek": ModelSpec("deepseek-coder-v2:16b-lite-instruct", "quick code snippets", False),
+    "deepseek": ModelSpec(
+        "deepseek-coder-v2:16b-lite-instruct-q4_0", "quick code snippets", False
+    ),
     "qwen36": ModelSpec("qwen3.6:27b", "previous daily driver, kept for A/B", False),
 }
 
