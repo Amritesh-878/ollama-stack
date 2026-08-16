@@ -16,6 +16,8 @@ SMI = "nvidia-smi"
 SMI_TIMEOUT = 5
 MIB = 1024 * 1024
 PINNED_AFTER_DAYS = 365
+UNLOAD_CHECKS = 5
+UNLOAD_SETTLE_SECONDS = 0.3
 
 
 class VramShortfallError(OllamaError):
@@ -188,6 +190,18 @@ def start(client: OllamaClient, alias: str) -> StartResult:
     return StartResult(tag, False, seconds, after, nvidia_vram())
 
 
+def _settled(client: OllamaClient, targets: set[str]) -> set[str]:
+    """Ollama drops the model a moment after acknowledging, so one immediate read reports a lie."""
+    left = targets
+    for attempt in range(UNLOAD_CHECKS):
+        left = {r.name for r in residents(client)} & targets
+        if not left:
+            return left
+        if attempt + 1 < UNLOAD_CHECKS:
+            time.sleep(UNLOAD_SETTLE_SECONDS)
+    return left
+
+
 def stop(client: OllamaClient, alias: str | None = None) -> StopResult:
     """Verified from /api/ps, because the request being accepted is not the model being gone."""
     before = {r.name for r in residents(client)}
@@ -195,7 +209,7 @@ def stop(client: OllamaClient, alias: str | None = None) -> StopResult:
     targets = [tag for tag in wanted if tag in before]
     for tag in targets:
         client.unload(tag)
-    left = {r.name for r in residents(client)}
+    left = _settled(client, set(targets))
     return StopResult(
         released=[tag for tag in targets if tag not in left],
         still_resident=[tag for tag in targets if tag in left],

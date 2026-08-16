@@ -160,12 +160,29 @@ def test_stop_unloads_and_confirms_from_ps(monkeypatch: pytest.MonkeyPatch) -> N
 @responses.activate
 def test_stop_reports_a_model_that_did_not_go(monkeypatch: pytest.MonkeyPatch) -> None:
     _smi(monkeypatch, "4000, 24463\n")
+    monkeypatch.setattr(lifecycle, "UNLOAD_SETTLE_SECONDS", 0)
     responses.add(responses.GET, PS, json={"models": [PS_ENTRY]})
     responses.add(responses.POST, GENERATE, json={"done": True, "done_reason": "unload"})
     responses.add(responses.GET, PS, json={"models": [PS_ENTRY]})
     result = lifecycle.stop(OllamaClient())
     assert result.released == []
     assert result.still_resident == ["qwen3.8:27b"]
+
+
+@responses.activate
+def test_stop_gives_ollama_a_moment_rather_than_calling_a_slow_unload_a_failure(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Reproduced live: an expired-TTL model was still in /api/ps immediately after unloading."""
+    _smi(monkeypatch, "4000, 24463\n")
+    monkeypatch.setattr(lifecycle, "UNLOAD_SETTLE_SECONDS", 0)
+    responses.add(responses.GET, PS, json={"models": [PS_ENTRY]})
+    responses.add(responses.POST, GENERATE, json={"done": True, "done_reason": "unload"})
+    responses.add(responses.GET, PS, json={"models": [PS_ENTRY]})
+    responses.add(responses.GET, PS, json={"models": []})
+    result = lifecycle.stop(OllamaClient())
+    assert result.released == ["qwen3.8:27b"]
+    assert result.still_resident == []
 
 
 @responses.activate
