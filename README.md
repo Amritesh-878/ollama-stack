@@ -1,20 +1,22 @@
 # ollama-stack
 
-A fast command-line front end for local models running on [Ollama](https://ollama.com).
+Ask your local [Ollama](https://ollama.com) models a question from the terminal.
 
 ```sh
 $ o what is 10+10
 20
 ```
 
-No subcommand, no quotes, streamed as it's produced. ~1s on a warm model.
+No subcommand, no quotes. The answer streams as it's written, in about a second on a warm model.
 
-> **Status: early.** Asking, streaming, `start`, `stop`, `status`, `ask`, `audit`, `models`,
-> `which`. `setup`, `config`, web search and images are not built yet. Interfaces will change.
+> **Early.** Interfaces will change.
 
 ---
 
-## Install
+## Setup
+
+You need [Ollama](https://ollama.com/download) running, Python 3.12+, and one model pulled
+(`ollama pull qwen3.5:4b`).
 
 ```sh
 git clone https://github.com/Amritesh-878/ollama-stack.git
@@ -23,102 +25,88 @@ uv sync
 uv tool install .     # puts `o` on your PATH
 ```
 
-Needs Ollama running, Python 3.12+, and at least one model pulled.
-
 ---
 
-## Usage
+## Asking things
 
 ```sh
 o what is 10+10                       # just ask
-o -m coder write a bash retry loop    # pick a model
-cat main.py | o explain this          # stdin becomes context
-o audit src/thing.py                  # screen one file for defects
-o models                              # aliases, and which have measurements behind them
-o which coder                         # what an alias resolves to
+o -m coder write a bash retry loop    # use a different model
+cat main.py | o explain this          # pipe a file in as context
 ```
 
 | Flag | Does |
 | ---- | ---- |
-| `-m, --model` | Alias or raw Ollama tag |
+| `-m, --model` | Alias like `coder`, or any Ollama tag like `llama4:8b` |
 | `--num-ctx` | Context window to request. Default 32768. |
-| `--no-stream` | Wait for the whole reply |
-| `--stats` | Wall time, token rate, and the pre-flight estimate |
-| `--dry-run` | Print what would be sent. Sends nothing. |
+| `--no-stream` | Wait for the whole reply instead of streaming |
+| `--stats` | Show wall time and tokens per second |
+| `--dry-run` | Show what would be sent, send nothing |
 | `--version` | Print the version |
 
-Answer goes to stdout, token counts to stderr — `o write a haiku > poem.txt` stays clean.
+The answer goes to stdout and the token counts to stderr, so `o write a haiku > poem.txt` gives
+you a clean file.
 
-### Keeping a model warm
-
-Cold load is ~10s, warm is ~1s, and Ollama drops a model after 5 minutes idle.
-
-```sh
-o start          # pin the default model in VRAM
-o status         # what's loaded and how much of the card it holds
-o stop           # release it
-```
-
-`o start` refuses if the card can't hold the model and names what's already on it. Nothing runs
-in the background — Ollama holds the model itself.
-
-### Bare questions starting with a command name
-
-`o status of the economy` runs `status`. Use `o ask "status of the economy"` instead. Reserved
-first words: `setup`, `start`, `stop`, `status`, `ask`, `audit`, `models`, `which`, `config`,
-`implement`.
+**If your question starts with a command name**, it runs the command — `o status of the economy`
+runs `status`. Use `o ask "status of the economy"` for those.
 
 ---
 
-## The num_ctx thing
+## Commands
 
-Ollama's `num_ctx` defaults to 4096 whatever the model advertises. Longer prompts are truncated
-**from the front**, with no warning, and the model answers confidently from what's left. The
-desktop app's *Context length* slider changes that default, so what you get depends on the
-machine.
+| | |
+| --- | --- |
+| `o start` | Pin a model in VRAM so the next question is fast |
+| `o stop` | Unload it and give the card back |
+| `o status` | What's loaded, how much VRAM it's using, how long it stays |
+| `o ask "..."` | Ask, when the question starts with a command name |
+| `o audit file.py` | Have a model read one file and report defects |
+| `o models` | List the aliases |
+| `o which coder` | Show what an alias resolves to |
 
-So this client always sends `num_ctx`, always checks `prompt_eval_count` on the way back, and
-raises rather than returning a reply that reached the window — or one that omits the count,
-since unknown isn't fine. Worth doing whether or not you use this tool.
-
-Two checks: a pre-flight estimate (chars ÷ 4) refuses before sending, exit 2. After streaming,
-the real count is checked — you've already seen the text, so it warns and exits non-zero anyway.
-
-**The usable window is half of `num_ctx`**, so the default refuses at 16384. Generation needs
-room in the same budget. That threshold rests on one measurement; raise `--num-ctx` if it fires
-on a prompt you know is fine.
+A cold model takes ~10s to load and Ollama drops it after 5 minutes idle, so `o start` is the
+difference between a fast tool and a slow one. `o start` refuses if the card can't hold the
+model and tells you what's already on it. Nothing runs in the background.
 
 ---
 
-## As a library
+## Why it refuses sometimes
+
+Ollama's `num_ctx` defaults to 4096 no matter what the model advertises, and a longer prompt is
+cut **from the front** with no warning — the model then answers confidently from what's left.
+
+So this tool always sends `num_ctx`, always checks how much of your prompt was actually read,
+and stops rather than hand you an answer built on half a question. If it refuses, send less or
+raise `--num-ctx`.
+
+---
+
+## Using it from Python
 
 ```python
 from ollama_stack import OllamaClient
 
 client = OllamaClient(num_ctx=32768)
 reply = client.generate("summarise this", "qwen", context=open("notes.md").read())
-print(reply.text, reply.prompt_eval_count)
-
-run = client.stream("summarise this", "qwen")
-for chunk in run:
-    print(chunk, end="", flush=True)
-print(run.reply.prompt_eval_count)      # counts arrive with the last chunk
+print(reply.text)
 ```
 
-Also `chat(messages, model, tools=...)`, and `load()` / `unload()` / `ps()` / `tags()` behind the
-lifecycle commands. `strict=False` returns `reply.suspect_truncation` instead of raising.
-
-Default host is `127.0.0.1`, not `localhost` — Ollama binds IPv4 only, and resolving `localhost`
-cost ~2s per connection here. Pass `host=` if yours is elsewhere.
-
-Aliases live in `src/ollama_stack/models.py`. Any raw tag works too: `o -m llama4:8b hello`.
+`stream()`, `chat()`, `start`/`stop` via `load()` and `unload()`. Model aliases live in
+`src/ollama_stack/models.py`.
 
 ---
 
-## Roadmap
+## Coming
 
-`o setup` (interactive first run), `o config`, web search past the model's cutoff, `-i` for
-images, `-c` for follow-ups, and an MCP server exposing local models as tools.
+Interactive setup, saved config, web search for questions past the model's cutoff, images,
+follow-up questions, and an MCP server so editors can call local models as tools.
+
+---
+
+## Worth knowing
+
+A local model is useful and it is not a senior engineer. `o audit` finding nothing means the
+file is unexamined, not clean.
 
 ---
 
@@ -128,17 +116,5 @@ images, `-c` for follow-ups, and an MCP server exposing local models as tools.
 uv sync --all-extras
 uv run ruff check --fix . && uv run mypy . && uv run pytest
 ```
-
-Lint, typecheck, tests, in that order. No network calls in the suite.
-
----
-
-## One caveat
-
-Small local models are useful and they are not a senior engineer. Trust what one says it did,
-never that it's finished. A "nothing found" from `o audit` means the file is unexamined, not
-clean.
-
----
 
 MIT — see [LICENSE](LICENSE).
