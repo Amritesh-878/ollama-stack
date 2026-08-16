@@ -131,6 +131,29 @@ def test_the_window_rule_has_one_definition_shared_by_the_client_and_the_reply()
     assert usable_window(32768) == OllamaClient(num_ctx=32768).usable_window == 16384
 
 
+@responses.activate
+def test_every_call_declares_whether_to_think_rather_than_leaving_it_to_the_model() -> None:
+    """Left unsent, qwen3.5:4b spends ~150 tokens reasoning about `what is 10+10`."""
+    responses.add(responses.POST, GENERATE, json=_body(), status=200)
+    OllamaClient().generate("p", "qwen")
+    assert '"think": false' in str(responses.calls[0].request.body)
+
+
+@responses.activate
+def test_a_thinking_client_asks_for_it() -> None:
+    responses.add(responses.POST, GENERATE, json=_body(), status=200)
+    OllamaClient(think=True).generate("p", "qwen")
+    assert '"think": true' in str(responses.calls[0].request.body)
+
+
+@responses.activate
+def test_an_error_key_on_a_two_hundred_is_raised_not_read_as_a_missing_count() -> None:
+    body = {"error": '"deepseek-coder-v2" does not support thinking'}
+    responses.add(responses.POST, GENERATE, json=body, status=200)
+    with pytest.raises(OllamaError, match="does not support thinking"):
+        OllamaClient(think=True).generate("p", "deepseek")
+
+
 def test_the_default_host_is_an_address_not_a_name() -> None:
     """Measured: resolving localhost costs ~2s per connection, which is most of a warm reply."""
     assert "localhost" not in OllamaClient().host

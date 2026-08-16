@@ -48,6 +48,7 @@ class Options:
     stats: bool = False
     dry_run: bool = False
     version: bool = False
+    think: bool = False
 
 
 def _value(argv: list[str], index: int, token: str) -> str:
@@ -77,6 +78,12 @@ def _parse(argv: list[str]) -> tuple[Options, list[str]]:
             index += 1
         elif token == "--stats":
             opts.stats = True
+            index += 1
+        elif token == "--think":
+            opts.think = True
+            index += 1
+        elif token == "--no-think":
+            opts.think = False
             index += 1
         elif token == "--dry-run":
             opts.dry_run = True
@@ -112,7 +119,7 @@ def _dry_run(opts: Options, prompt: str, context: str) -> int:
     from ollama_stack.client import ContextTruncationError, OllamaClient, estimate_tokens
     from ollama_stack.models import resolve
 
-    client = OllamaClient(num_ctx=opts.num_ctx)
+    client = OllamaClient(num_ctx=opts.num_ctx, think=opts.think)
     full = f"{context}\n\n{prompt}".strip() if context else prompt
     spec = resolve(opts.model)
     print(f"model     {opts.model} -> {spec.tag}")
@@ -120,6 +127,7 @@ def _dry_run(opts: Options, prompt: str, context: str) -> int:
     print(f"window    {client.usable_window} (refused at or above)")
     print(f"estimate  {estimate_tokens(full)} prompt tokens")
     print(f"stream    {'on' if opts.stream else 'off'}")
+    print(f"think     {'on' if opts.think else 'off'}")
     try:
         client.preflight(full)
     except ContextTruncationError as exc:
@@ -173,7 +181,7 @@ def run_query(opts: Options, prompt: str, context: str = "") -> int:
 
     if opts.dry_run:
         return _dry_run(opts, prompt, context)
-    client = OllamaClient(num_ctx=opts.num_ctx)
+    client = OllamaClient(num_ctx=opts.num_ctx, think=opts.think)
     started = time.perf_counter()
     first_word: float | None = None
     run: StreamRun | None = None

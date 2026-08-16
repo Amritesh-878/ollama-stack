@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import subprocess
 import sys
+from pathlib import Path
 from typing import Any
 
 import pytest
@@ -12,6 +13,7 @@ import responses
 
 from ollama_stack.__main__ import RESERVED, _parse, main
 from ollama_stack.cli import app
+from ollama_stack.models import FAST_ALIAS, HEAVY_ALIAS, REGISTRY
 
 GENERATE = "http://127.0.0.1:11434/api/generate"
 
@@ -44,7 +46,14 @@ def _stream_body(*words: str, prompt_eval_count: int = 10) -> str:
 def test_a_bare_question_becomes_the_prompt() -> None:
     opts, words = _parse(["what", "is", "10+10"])
     assert words == ["what", "is", "10+10"]
-    assert opts.model == "qwen"
+    assert opts.model == FAST_ALIAS
+
+
+def test_a_bare_question_does_not_think_unless_asked() -> None:
+    """Measured: thinking costs qwen3.5:4b ~1.4s before it shows a single word."""
+    assert _parse(["what", "is", "10+10"])[0].think is False
+    assert _parse(["--think", "why"])[0].think is True
+    assert _parse(["--think", "--no-think", "why"])[0].think is False
 
 
 def test_flags_before_the_prompt_are_not_prompt_text() -> None:
@@ -196,6 +205,53 @@ def test_a_reply_that_never_streamed_reports_no_first_token(
     responses.add(responses.POST, GENERATE, json=body)
     main(["--no-stream", "--stats", "the", "answer"])
     assert "first" not in capsys.readouterr().err
+
+
+@responses.activate
+def test_the_bare_path_asks_ollama_not_to_think(capsys: pytest.CaptureFixture[str]) -> None:
+    responses.add(responses.POST, GENERATE, body=_stream_body("20"))
+    main(["what", "is", "10+10"])
+    assert _sent()["think"] is False
+
+
+@responses.activate
+def test_think_turns_it_back_on(capsys: pytest.CaptureFixture[str]) -> None:
+    responses.add(responses.POST, GENERATE, body=_stream_body("20"))
+    main(["--think", "why", "is", "the", "sky", "blue"])
+    assert _sent()["think"] is True
+
+
+@responses.activate
+def test_a_bare_question_goes_to_the_small_model(capsys: pytest.CaptureFixture[str]) -> None:
+    responses.add(responses.POST, GENERATE, body=_stream_body("20"))
+    main(["what", "is", "10+10"])
+    assert _sent()["model"] == REGISTRY[FAST_ALIAS].tag
+
+
+@responses.activate
+def test_audit_goes_to_the_heavy_model_and_does_think(
+    capsys: pytest.CaptureFixture[str], tmp_path: Path
+) -> None:
+    """Screening is multi-step, so it keeps the reasoning the hot path drops."""
+    target = tmp_path / "sample.py"
+    target.write_text("def f():\n    return 1\n", encoding="utf-8")
+    responses.add(responses.POST, GENERATE, body=_stream_body("nothing found"))
+    with pytest.raises(SystemExit):
+        main(["audit", str(target)])
+    sent = _sent()
+    assert sent["model"] == REGISTRY[HEAVY_ALIAS].tag
+    assert sent["think"] is True
+
+
+@responses.activate
+def test_a_two_hundred_carrying_an_error_is_surfaced_not_read_as_a_missing_count(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Ollama reports "does not support thinking" as 200 plus an error key."""
+    body = {"error": '"deepseek" does not support thinking'}
+    responses.add(responses.POST, GENERATE, json=body, status=200)
+    assert main(["--no-stream", "--think", "-m", "deepseek", "hello"]) == 1
+    assert "does not support thinking" in capsys.readouterr().err
 
 
 @responses.activate

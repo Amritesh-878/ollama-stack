@@ -86,12 +86,14 @@ class OllamaClient:
         temperature: float = 0.2,
         timeout: int = DEFAULT_TIMEOUT,
         strict: bool = True,
+        think: bool = False,
     ) -> None:
         self.host = host.rstrip("/")
         self.num_ctx = num_ctx
         self.temperature = temperature
         self.timeout = timeout
         self.strict = strict
+        self.think = think
 
     @property
     def usable_window(self) -> int:
@@ -111,6 +113,8 @@ class OllamaClient:
         # Ollama defaults to num_ctx 4096 whatever the model advertises, so it is always sent.
         payload["options"] = {"num_ctx": self.num_ctx, "temperature": self.temperature}
         payload["stream"] = stream
+        # Sent from here, never per call site: left off, a reasoning model triples the wait.
+        payload["think"] = self.think
         if keep_alive is not None:
             payload["keep_alive"] = keep_alive
         try:
@@ -130,6 +134,9 @@ class OllamaClient:
             body: dict[str, Any] = response.json()
         except ValueError as exc:
             raise OllamaError(f"{path} answered with something that is not JSON: {exc}") from exc
+        # Ollama reports "does not support thinking" and friends as 200 plus this key, not a 4xx.
+        if body.get("error"):
+            raise OllamaError(f"ollama refused the request: {body['error']}")
         return body
 
     def _get(self, path: str) -> dict[str, Any]:

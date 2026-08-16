@@ -17,7 +17,9 @@ class ModelSpec:
 
 
 REGISTRY: dict[str, ModelSpec] = {
-    "qwen": ModelSpec("qwen3.8:27b", "primary daily driver, vision, 256K advertised", False),
+    "fast": ModelSpec("qwen3.5:4b", "hot path: bare questions and `o start`", False),
+    "heavy": ModelSpec("qwen3.8:27b", "audits and long work; vision, 256K advertised", False),
+    "qwen": ModelSpec("qwen3.8:27b", "the heavy model under its earlier alias", False),
     "coder": ModelSpec("qwen3-coder:30b", "agentic coding; the only measured implementer", True),
     "dev": ModelSpec("devstral:24b", "multi-file agentic work", False),
     "think": ModelSpec("deepseek-r1:32b", "open-ended reasoning, NOT defect hunting", True),
@@ -28,7 +30,9 @@ REGISTRY: dict[str, ModelSpec] = {
     "qwen36": ModelSpec("qwen3.6:27b", "previous daily driver, kept for A/B", False),
 }
 
-DEFAULT_ALIAS = "qwen"
+FAST_ALIAS = "fast"
+HEAVY_ALIAS = "heavy"
+DEFAULT_ALIAS = FAST_ALIAS
 
 
 def resolve(name: str) -> ModelSpec:

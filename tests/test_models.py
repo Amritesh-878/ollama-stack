@@ -2,15 +2,39 @@
 
 from __future__ import annotations
 
-from ollama_stack.models import DEFAULT_ALIAS, REGISTRY, resolve
+from ollama_stack.models import (
+    DEFAULT_ALIAS,
+    FAST_ALIAS,
+    HEAVY_ALIAS,
+    REGISTRY,
+    resolve,
+)
 
 
 def test_the_default_alias_exists_in_the_registry() -> None:
     assert DEFAULT_ALIAS in REGISTRY
 
 
-def test_the_primary_is_qwen38() -> None:
-    assert REGISTRY[DEFAULT_ALIAS].tag == "qwen3.8:27b"
+def test_both_roles_exist_in_the_registry() -> None:
+    assert {FAST_ALIAS, HEAVY_ALIAS} <= set(REGISTRY)
+
+
+def test_a_bare_question_goes_to_the_small_model() -> None:
+    """The whole point of TASK-004: the always-warm model is 4 GiB, not 16."""
+    assert DEFAULT_ALIAS == FAST_ALIAS
+    assert REGISTRY[DEFAULT_ALIAS].tag == "qwen3.5:4b"
+
+
+def test_the_heavy_role_is_the_27b() -> None:
+    assert REGISTRY[HEAVY_ALIAS].tag == "qwen3.8:27b"
+
+
+def test_the_two_roles_are_different_models() -> None:
+    assert REGISTRY[FAST_ALIAS].tag != REGISTRY[HEAVY_ALIAS].tag
+
+
+def test_the_earlier_qwen_alias_still_reaches_the_heavy_model() -> None:
+    assert resolve("qwen").tag == REGISTRY[HEAVY_ALIAS].tag
 
 
 def test_an_alias_resolves_to_its_tag() -> None:
@@ -27,5 +51,7 @@ def test_an_unknown_tag_is_passed_through_as_unmeasured() -> None:
     assert not spec.measured
 
 
-def test_the_primary_is_still_flagged_unmeasured() -> None:
-    assert not REGISTRY["qwen"].measured, "flip this only when BRAINSTORM 2c/2d re-run on qwen3.8"
+def test_neither_role_is_flagged_measured() -> None:
+    """TASK-004 measured latency and capability. Quality is TASK-009 and is untouched."""
+    assert not REGISTRY[FAST_ALIAS].measured
+    assert not REGISTRY[HEAVY_ALIAS].measured
