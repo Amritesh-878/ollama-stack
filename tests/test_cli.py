@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import io
 import json
 import subprocess
 import sys
@@ -11,7 +12,7 @@ from typing import Any
 import pytest
 import responses
 
-from ollama_stack.__main__ import RESERVED, _parse, main
+from ollama_stack.__main__ import RESERVED, _parse, _utf8, main
 from ollama_stack.cli import app
 from ollama_stack.models import FAST_ALIAS, HEAVY_ALIAS, REGISTRY
 
@@ -205,6 +206,19 @@ def test_a_reply_that_never_streamed_reports_no_first_token(
     responses.add(responses.POST, GENERATE, json=body)
     main(["--no-stream", "--stats", "the", "answer"])
     assert "first" not in capsys.readouterr().err
+
+
+def test_a_cp1252_stream_is_reconfigured_to_survive_what_a_model_writes() -> None:
+    """Measured: an arrow in an answer raised UnicodeEncodeError and truncated the reply."""
+    stream = io.TextIOWrapper(io.BytesIO(), encoding="cp1252", errors="strict")
+    _utf8(stream)
+    stream.write("10 → 20 — done ✓")
+    stream.flush()
+    assert stream.encoding == "utf-8"
+
+
+def test_a_stream_that_cannot_be_reconfigured_is_left_alone() -> None:
+    _utf8(object())
 
 
 @responses.activate

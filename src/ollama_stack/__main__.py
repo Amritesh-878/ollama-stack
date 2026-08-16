@@ -97,6 +97,17 @@ def _parse(argv: list[str]) -> tuple[Options, list[str]]:
     return opts, words
 
 
+def _utf8(stream: object) -> None:
+    """A redirected stream defaults to cp1252 here, which raises on an arrow the model wrote."""
+    reconfigure = getattr(stream, "reconfigure", None)
+    if reconfigure is None:
+        return
+    try:
+        reconfigure(encoding="utf-8", errors="replace")
+    except (ValueError, OSError):
+        return
+
+
 def piped_context() -> str:
     """Piped input is context; a terminal is not, and isatty is the only way to tell."""
     try:
@@ -213,6 +224,8 @@ def run_query(opts: Options, prompt: str, context: str = "") -> int:
 
 
 def main(argv: list[str] | None = None) -> int:
+    _utf8(sys.stdout)
+    _utf8(sys.stderr)
     args = list(sys.argv[1:] if argv is None else argv)
     try:
         opts, words = _parse(args)
