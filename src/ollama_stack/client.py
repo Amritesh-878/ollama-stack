@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import time
 from collections.abc import Iterator
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
@@ -212,10 +213,11 @@ class OllamaClient:
         spec = resolve(model)
         full = _joined(prompt, context)
         self.preflight(full)
+        started = time.perf_counter()
         response = self._request(
             "/api/generate", {"model": spec.tag, "prompt": full}, stream=True
         )
-        return StreamRun(self, response, spec.tag)
+        return StreamRun(self, response, spec.tag, started)
 
     def load(self, model: str) -> None:
         """The one path exempt from the count check: a load evaluates nothing, so none exists."""
@@ -259,11 +261,21 @@ class OllamaClient:
 class StreamRun:
     """One streamed reply: text arrives first and the counts last, so the guard fires last too."""
 
-    def __init__(self, client: OllamaClient, response: requests.Response, model: str) -> None:
+    def __init__(
+        self,
+        client: OllamaClient,
+        response: requests.Response,
+        model: str,
+        started: float | None = None,
+    ) -> None:
         self._client = client
         self._response = response
         self._model = model
         self._final: Reply | None = None
+        self._started = time.perf_counter() if started is None else started
+        self.first_chunk_seconds: float | None = None
+        # A reasoning model emits these before a single visible word, which looks like a stall.
+        self.thinking_tokens = 0
 
     @property
     def reply(self) -> Reply:
@@ -284,6 +296,10 @@ class StreamRun:
                 chunk: dict[str, Any] = json.loads(line)
                 if chunk.get("error"):
                     raise OllamaError(f"ollama failed mid-stream: {chunk['error']}")
+                if self.first_chunk_seconds is None:
+                    self.first_chunk_seconds = time.perf_counter() - self._started
+                if chunk.get("thinking"):
+                    self.thinking_tokens += 1
                 piece = str(chunk.get("response", ""))
                 if piece:
                     text.append(piece)

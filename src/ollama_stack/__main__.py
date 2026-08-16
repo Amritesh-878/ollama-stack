@@ -10,7 +10,7 @@ from typing import TYPE_CHECKING
 from ollama_stack.models import DEFAULT_ALIAS, DEFAULT_NUM_CTX
 
 if TYPE_CHECKING:
-    from ollama_stack.client import Reply
+    from ollama_stack.client import Reply, StreamRun
 
 RESERVED = frozenset(
     {
@@ -127,7 +127,27 @@ def _dry_run(opts: Options, prompt: str, context: str) -> int:
     return 0
 
 
-def _status_line(opts: Options, reply: Reply, estimate: int, seconds: float) -> None:
+def _timings(run: StreamRun | None, first_word: float | None) -> list[str]:
+    """Two figures, because a reasoning model answers long before it says anything."""
+    if run is None:
+        return []
+    timings = []
+    if run.first_chunk_seconds is not None:
+        timings.append(f"first chunk {run.first_chunk_seconds * 1000:.0f}ms")
+    if first_word is not None:
+        timings.append(f"first word {first_word * 1000:.0f}ms")
+    if run.thinking_tokens:
+        timings.append(f"thought {run.thinking_tokens} tok first")
+    return timings
+
+
+def _status_line(
+    opts: Options,
+    reply: Reply,
+    estimate: int,
+    seconds: float,
+    timings: list[str],
+) -> None:
     parts = [
         reply.model,
         f"prompt {reply.prompt_eval_count}/{reply.usable_window} tok",
@@ -137,6 +157,8 @@ def _status_line(opts: Options, reply: Reply, estimate: int, seconds: float) -> 
         rate = reply.eval_count / seconds if seconds > 0 else 0.0
         parts[1] += f", estimated {estimate}"
         parts[2] += f" in {seconds:.2f}s wall, {rate:.1f} tok/s"
+        # Wall time here starts at the request, so it excludes the ~80ms of process start.
+        parts.extend(timings)
     print(f"[{' | '.join(parts)}]", file=sys.stderr)
 
 
@@ -153,11 +175,15 @@ def run_query(opts: Options, prompt: str, context: str = "") -> int:
         return _dry_run(opts, prompt, context)
     client = OllamaClient(num_ctx=opts.num_ctx)
     started = time.perf_counter()
+    first_word: float | None = None
+    run: StreamRun | None = None
     try:
         if opts.stream:
             run = client.stream(prompt, opts.model, context=context)
             try:
                 for chunk in run:
+                    if first_word is None:
+                        first_word = time.perf_counter() - started
                     sys.stdout.write(chunk)
                     sys.stdout.flush()
             finally:
@@ -174,7 +200,7 @@ def run_query(opts: Options, prompt: str, context: str = "") -> int:
         print(f"error: {exc}", file=sys.stderr)
         return 1
     estimate = estimate_tokens(f"{context}\n\n{prompt}".strip() if context else prompt)
-    _status_line(opts, reply, estimate, time.perf_counter() - started)
+    _status_line(opts, reply, estimate, time.perf_counter() - started, _timings(run, first_word))
     return 0
 
 

@@ -159,6 +159,46 @@ def test_stats_adds_the_estimate_and_timing_to_the_stderr_line(
 
 
 @responses.activate
+def test_stats_times_the_first_chunk_not_the_whole_reply(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    responses.add(responses.POST, GENERATE, body=_stream_body("4", "2"))
+    main(["--stats", "the", "answer"])
+    err = capsys.readouterr().err
+    assert "first chunk" in err
+    assert "first word" in err
+
+
+@responses.activate
+def test_thinking_tokens_are_counted_so_the_silence_before_an_answer_is_explained(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """qwen3.8 emits ~21 thinking tokens first; without this the wait looks like a stall."""
+    body = _ndjson(
+        {"response": "", "thinking": "The", "done": False},
+        {"response": "", "thinking": " user", "done": False},
+        {"response": "20", "done": False},
+        {"response": "", "done": True, "prompt_eval_count": 10, "eval_count": 3},
+    )
+    responses.add(responses.POST, GENERATE, body=body)
+    main(["--stats", "the", "answer"])
+    captured = capsys.readouterr()
+    assert captured.out == "20\n"
+    assert "thought 2 tok first" in captured.err
+
+
+@responses.activate
+def test_a_reply_that_never_streamed_reports_no_first_token(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """--no-stream has no first chunk to time, and a fabricated figure would be worse than none."""
+    body = {"response": "42", "prompt_eval_count": 10, "eval_count": 1}
+    responses.add(responses.POST, GENERATE, json=body)
+    main(["--no-stream", "--stats", "the", "answer"])
+    assert "first" not in capsys.readouterr().err
+
+
+@responses.activate
 def test_a_preflight_refusal_sends_no_request_at_all(
     capsys: pytest.CaptureFixture[str],
 ) -> None:

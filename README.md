@@ -40,12 +40,17 @@ cat main.py | o explain this          # pipe a file in as context
 | `-m, --model` | Alias like `coder`, or any Ollama tag like `llama4:8b` |
 | `--num-ctx` | Context window to request. Default 32768. |
 | `--no-stream` | Wait for the whole reply instead of streaming |
-| `--stats` | Show wall time and tokens per second |
+| `--stats` | Wall time, tokens per second, and how long until the first word |
 | `--dry-run` | Show what would be sent, send nothing |
 | `--version` | Print the version |
 
 The answer goes to stdout and the token counts to stderr, so `o write a haiku > poem.txt` gives
 you a clean file.
+
+**Reasoning models pause before they answer.** They spend tokens thinking first, and that
+thinking isn't printed — so on `qwen3.8` you wait about 0.9s to see a word where a plain model
+takes 0.2s. `--stats` shows how many tokens went to thinking, so a pause is explained rather
+than mysterious.
 
 **If your question starts with a command name**, it runs the command — `o status of the economy`
 runs `status`. Use `o ask "status of the economy"` for those.
