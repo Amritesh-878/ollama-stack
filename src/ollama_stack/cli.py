@@ -7,7 +7,10 @@ from typing import Annotated
 
 import typer
 
+from ollama_stack import lifecycle
 from ollama_stack.__main__ import Options, piped_context, run_query
+from ollama_stack.client import OllamaClient, OllamaError
+from ollama_stack.lifecycle import Resident, Vram
 from ollama_stack.models import DEFAULT_ALIAS, DEFAULT_NUM_CTX, REGISTRY, resolve
 
 app = typer.Typer(
@@ -53,6 +56,91 @@ def audit(
     )
     opts = Options(model=model, num_ctx=num_ctx, stream=not no_stream, stats=stats)
     raise typer.Exit(run_query(opts, prompt, f"--- {file.name} ---\n{body}"))
+
+
+def _bar(vram: Vram, width: int = 20) -> str:
+    if vram.total_mib <= 0:
+        return "[" + "?" * width + "]"
+    filled = min(width, max(0, round(width * vram.used_mib / vram.total_mib)))
+    return "[" + "#" * filled + "-" * (width - filled) + "]"
+
+
+def _echo_resident(resident: Resident | None) -> None:
+    if resident is None:
+        typer.echo("  ollama reports it as not loaded, which disagrees with the load it just did")
+        return
+    split = "unknown" if resident.gpu_percent is None else f"{resident.gpu_percent}% GPU"
+    typer.echo(
+        f"  {resident.size_mib} MiB total, {resident.vram_mib} MiB on the card ({split}), "
+        f"ctx {resident.context_length}, ttl {resident.ttl}"
+    )
+
+
+def _echo_vram(vram: Vram | None) -> None:
+    if vram is None:
+        typer.echo("  card: unknown, nvidia-smi did not answer")
+        return
+    typer.echo(f"  card: {vram.used_mib}/{vram.total_mib} MiB used {_bar(vram)}")
+
+
+def _fail(exc: OllamaError) -> typer.Exit:
+    typer.secho(f"error: {exc}", fg=typer.colors.RED, err=True)
+    return typer.Exit(1)
+
+
+@app.command()
+def start(
+    model: str = typer.Option(DEFAULT_ALIAS, "--model", "-m", help="Registry alias or raw tag."),
+    num_ctx: int = typer.Option(DEFAULT_NUM_CTX, "--num-ctx", help="Window to pin the model at."),
+) -> None:
+    """Pin a model in VRAM so the next question is warm rather than a ten second load."""
+    try:
+        result = lifecycle.start(OllamaClient(num_ctx=num_ctx), model)
+    except OllamaError as exc:
+        raise _fail(exc) from exc
+    if result.already_resident:
+        typer.echo(f"{result.model} is already loaded, nothing to do")
+    else:
+        typer.echo(f"{result.model} ready in {result.seconds:.1f}s")
+    _echo_resident(result.resident)
+    _echo_vram(result.vram)
+
+
+@app.command()
+def stop(
+    model: str = typer.Option("", "--model", "-m", help="Only this one; default releases all."),
+) -> None:
+    """Release loaded models and give the card back."""
+    try:
+        result = lifecycle.stop(OllamaClient(), model or None)
+    except OllamaError as exc:
+        raise _fail(exc) from exc
+    if not result.released and not result.still_resident:
+        typer.echo("nothing was loaded")
+        return
+    for tag in result.released:
+        typer.echo(f"released {tag}")
+    for tag in result.still_resident:
+        typer.secho(
+            f"{tag} is still loaded after the unload request", fg=typer.colors.RED, err=True
+        )
+    if result.still_resident:
+        raise typer.Exit(1)
+
+
+@app.command()
+def status() -> None:
+    """What is loaded, how much of the card it holds, and how long it stays."""
+    try:
+        current = lifecycle.status(OllamaClient())
+    except OllamaError as exc:
+        raise _fail(exc) from exc
+    if not current.residents:
+        typer.echo("nothing is loaded - run `o start` to pin a model")
+    for resident in current.residents:
+        typer.echo(resident.name)
+        _echo_resident(resident)
+    _echo_vram(current.vram)
 
 
 @app.command()

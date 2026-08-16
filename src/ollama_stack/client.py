@@ -11,9 +11,12 @@ from ollama_stack.models import DEFAULT_NUM_CTX, resolve
 if TYPE_CHECKING:
     import requests
 
-DEFAULT_HOST = "http://localhost:11434"
+# Not localhost: resolving it costs ~2s per connection where ollama binds IPv4 only.
+DEFAULT_HOST = "http://127.0.0.1:11434"
 DEFAULT_TIMEOUT = 600
 PROBE_TIMEOUT = 10
+PIN = -1
+RELEASE = 0
 
 
 class OllamaError(RuntimeError):
@@ -36,6 +39,14 @@ def estimate_tokens(text: str) -> int:
 
 def _joined(prompt: str, context: str) -> str:
     return f"{context}\n\n{prompt}".strip() if context else prompt
+
+
+def _models(body: dict[str, Any]) -> list[dict[str, Any]]:
+    """Ollama owns this shape, so anything unexpected reads as an empty list, never a crash."""
+    models = body.get("models")
+    if not isinstance(models, list):
+        return []
+    return [entry for entry in models if isinstance(entry, dict)]
 
 
 @dataclass(frozen=True)
@@ -113,7 +124,11 @@ class OllamaClient:
     def _post(
         self, path: str, payload: dict[str, Any], *, keep_alive: int | None = None
     ) -> dict[str, Any]:
-        body: dict[str, Any] = self._request(path, payload, keep_alive=keep_alive).json()
+        response = self._request(path, payload, keep_alive=keep_alive)
+        try:
+            body: dict[str, Any] = response.json()
+        except ValueError as exc:
+            raise OllamaError(f"{path} answered with something that is not JSON: {exc}") from exc
         return body
 
     def _get(self, path: str) -> dict[str, Any]:
@@ -122,9 +137,9 @@ class OllamaClient:
         try:
             response = requests.get(f"{self.host}{path}", timeout=PROBE_TIMEOUT)
             response.raise_for_status()
-        except requests.RequestException as exc:
+            body: dict[str, Any] = response.json()
+        except (requests.RequestException, ValueError) as exc:
             raise OllamaError(f"{path} failed against {self.host}: {exc}") from exc
-        body: dict[str, Any] = response.json()
         return body
 
     def preflight(self, text: str) -> None:
@@ -201,6 +216,27 @@ class OllamaClient:
             "/api/generate", {"model": spec.tag, "prompt": full}, stream=True
         )
         return StreamRun(self, response, spec.tag)
+
+    def load(self, model: str) -> None:
+        """The one path exempt from the count check: a load evaluates nothing, so none exists."""
+        spec = resolve(model)
+        body = self._post("/api/generate", {"model": spec.tag, "prompt": ""}, keep_alive=PIN)
+        reason = body.get("done_reason")
+        if reason is not None and reason != "load":
+            raise OllamaError(f"asked {spec.tag} to load and it reported {reason!r} instead")
+
+    def unload(self, model: str) -> None:
+        """Asks Ollama to drop the model; whether it went is a question for /api/ps."""
+        spec = resolve(model)
+        self._post("/api/generate", {"model": spec.tag, "prompt": ""}, keep_alive=RELEASE)
+
+    def ps(self) -> list[dict[str, Any]]:
+        """What Ollama says is resident right now."""
+        return _models(self._get("/api/ps"))
+
+    def tags(self) -> list[dict[str, Any]]:
+        """Every model pulled locally, resident or not."""
+        return _models(self._get("/api/tags"))
 
     def chat(
         self,

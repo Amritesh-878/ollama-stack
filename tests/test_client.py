@@ -16,8 +16,8 @@ from ollama_stack.client import (
     usable_window,
 )
 
-GENERATE = "http://localhost:11434/api/generate"
-CHAT = "http://localhost:11434/api/chat"
+GENERATE = "http://127.0.0.1:11434/api/generate"
+CHAT = "http://127.0.0.1:11434/api/chat"
 
 
 def _body(**over: Any) -> dict[str, Any]:
@@ -131,6 +131,11 @@ def test_the_window_rule_has_one_definition_shared_by_the_client_and_the_reply()
     assert usable_window(32768) == OllamaClient(num_ctx=32768).usable_window == 16384
 
 
+def test_the_default_host_is_an_address_not_a_name() -> None:
+    """Measured: resolving localhost costs ~2s per connection, which is most of a warm reply."""
+    assert "localhost" not in OllamaClient().host
+
+
 @responses.activate
 def test_a_prompt_estimated_over_the_window_is_refused_before_anything_is_sent() -> None:
     responses.add(responses.POST, GENERATE, json=_body(), status=200)
@@ -235,6 +240,65 @@ def test_a_chunk_that_is_not_json_is_reported_rather_than_crashing() -> None:
     responses.add(responses.POST, GENERATE, body="not json at all", status=200)
     with pytest.raises(OllamaError, match="not JSON"):
         list(OllamaClient().stream("p", "qwen"))
+
+
+@responses.activate
+def test_load_is_the_one_path_exempt_from_the_missing_count_check() -> None:
+    """A load evaluates nothing, so demanding a count would make `o start` impossible."""
+    responses.add(responses.POST, GENERATE, json={"done": True, "done_reason": "load"}, status=200)
+    OllamaClient().load("qwen")
+    assert '"keep_alive": -1' in str(responses.calls[0].request.body)
+
+
+@responses.activate
+def test_the_exemption_does_not_leak_into_generate() -> None:
+    responses.add(responses.POST, GENERATE, json={"response": "hi"}, status=200)
+    with pytest.raises(OllamaError, match="no prompt_eval_count"):
+        OllamaClient().generate("p", "qwen")
+
+
+@responses.activate
+def test_the_exemption_does_not_leak_into_chat() -> None:
+    responses.add(responses.POST, CHAT, json={"message": {"content": "hi"}}, status=200)
+    with pytest.raises(OllamaError, match="no prompt_eval_count"):
+        OllamaClient().chat([{"role": "user", "content": "go"}], "qwen")
+
+
+@responses.activate
+def test_a_pin_still_declares_num_ctx_so_it_is_not_left_to_ollamas_default() -> None:
+    responses.add(responses.POST, GENERATE, json={"done": True, "done_reason": "load"}, status=200)
+    OllamaClient(num_ctx=8192).load("qwen")
+    assert '"num_ctx": 8192' in str(responses.calls[0].request.body)
+
+
+@responses.activate
+def test_a_load_that_reports_anything_but_a_load_is_refused() -> None:
+    responses.add(responses.POST, GENERATE, json={"done": True, "done_reason": "stop"}, status=200)
+    with pytest.raises(OllamaError, match="reported 'stop'"):
+        OllamaClient().load("qwen")
+
+
+@responses.activate
+def test_unload_asks_ollama_to_release_the_model() -> None:
+    responses.add(responses.POST, GENERATE, json={"done_reason": "unload"}, status=200)
+    OllamaClient().unload("qwen3.8:27b")
+    assert '"keep_alive": 0' in str(responses.calls[0].request.body)
+
+
+@responses.activate
+def test_a_two_hundred_that_is_not_json_is_reported_rather_than_crashing() -> None:
+    responses.add(responses.POST, GENERATE, body="<html>proxy error</html>", status=200)
+    with pytest.raises(OllamaError, match="not JSON"):
+        OllamaClient().generate("p", "qwen")
+
+
+@responses.activate
+def test_ps_and_tags_return_an_empty_list_for_any_body_that_is_not_the_expected_shape() -> None:
+    responses.add(responses.GET, "http://127.0.0.1:11434/api/ps", json={}, status=200)
+    responses.add(responses.GET, "http://127.0.0.1:11434/api/tags", json={"models": 7}, status=200)
+    client = OllamaClient()
+    assert client.ps() == []
+    assert client.tags() == []
 
 
 @responses.activate

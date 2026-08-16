@@ -13,7 +13,7 @@ import responses
 from ollama_stack.__main__ import RESERVED, _parse, main
 from ollama_stack.cli import app
 
-GENERATE = "http://localhost:11434/api/generate"
+GENERATE = "http://127.0.0.1:11434/api/generate"
 
 
 def _ndjson(*chunks: dict[str, Any]) -> str:
@@ -98,7 +98,7 @@ def test_every_subcommand_is_reserved_so_none_can_be_eaten_as_a_prompt() -> None
 
     registered = set(get_group(app).commands)
     assert registered <= RESERVED
-    assert RESERVED - registered == {"setup", "start", "stop", "status", "config", "implement"}
+    assert RESERVED - registered == {"setup", "config", "implement"}
 
 
 def test_help_documents_the_reserved_word_rule_in_actionable_words(
