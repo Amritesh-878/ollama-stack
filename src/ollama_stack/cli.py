@@ -116,7 +116,8 @@ def stop(
     except OllamaError as exc:
         raise _fail(exc) from exc
     if not result.released and not result.still_resident:
-        typer.echo("nothing was loaded")
+        # "nothing was loaded" would be a lie when a different model still holds the card.
+        typer.echo(f"{resolve(model).tag} is not loaded" if model else "nothing was loaded")
         return
     for tag in result.released:
         typer.echo(f"released {tag}")

@@ -11,7 +11,7 @@ import pytest
 import requests
 import responses
 
-from ollama_stack import lifecycle
+from ollama_stack import cli, lifecycle
 from ollama_stack.client import OllamaClient, OllamaError
 from ollama_stack.lifecycle import Resident, Vram, VramShortfallError
 
@@ -173,6 +173,17 @@ def test_stop_with_nothing_loaded_sends_no_unload() -> None:
     responses.add(responses.GET, PS, json={"models": []})
     result = lifecycle.stop(OllamaClient())
     assert (result.released, result.still_resident) == ([], [])
+    assert not _posts()
+
+
+@responses.activate
+def test_stopping_a_model_that_is_not_loaded_leaves_the_resident_one_alone(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    _smi(monkeypatch, "21348, 24463\n")
+    responses.add(responses.GET, PS, json={"models": [PS_ENTRY]})
+    cli.stop(model="coder")
+    assert "qwen3-coder:30b is not loaded" in capsys.readouterr().out
     assert not _posts()
 
 
