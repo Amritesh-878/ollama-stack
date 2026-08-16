@@ -37,8 +37,9 @@ cat main.py | o explain this          # pipe a file in as context
 
 | Flag | Does |
 | ---- | ---- |
-| `-m, --model` | Alias like `coder`, or any Ollama tag like `llama4:8b` |
+| `-m, --model` | Alias like `heavy` or `coder`, or any Ollama tag like `llama4:8b` |
 | `--num-ctx` | Context window to request. Default 32768. |
+| `--think` | Let the model reason before answering. Off by default. |
 | `--no-stream` | Wait for the whole reply instead of streaming |
 | `--stats` | Wall time, tokens per second, and how long until the first word |
 | `--dry-run` | Show what would be sent, send nothing |
@@ -47,10 +48,15 @@ cat main.py | o explain this          # pipe a file in as context
 The answer goes to stdout and the token counts to stderr, so `o write a haiku > poem.txt` gives
 you a clean file.
 
-**Reasoning models pause before they answer.** They spend tokens thinking first, and that
-thinking isn't printed — so on `qwen3.8` you wait about 0.9s to see a word where a plain model
-takes 0.2s. `--stats` shows how many tokens went to thinking, so a pause is explained rather
-than mysterious.
+**Two models, two jobs.** `fast` (`qwen3.5:4b`, 4 GB) answers your questions and is what
+`o start` pins. `heavy` (`qwen3.8:27b`, 16 GB) is for `o audit` and anything you'd rather wait
+for. `-m` overrides either.
+
+**Thinking is off by default, and that is most of the speed.** These models will reason at
+length before saying anything, and none of that reasoning is printed — so you watch an empty
+terminal. On `qwen3.5:4b`, `what is 10+10` takes **0.45s** to show a word with thinking off and
+**1.7s** with it on, because it spends ~170 tokens deciding. Use `--think` when the question
+deserves it. `--stats` shows how many tokens went to thinking.
 
 **If your question starts with a command name**, it runs the command — `o status of the economy`
 runs `status`. Use `o ask "status of the economy"` for those.
@@ -69,8 +75,8 @@ runs `status`. Use `o ask "status of the economy"` for those.
 | `o models` | List the aliases |
 | `o which coder` | Show what an alias resolves to |
 
-A cold model takes ~10s to load and Ollama drops it after 5 minutes idle, so `o start` is the
-difference between a fast tool and a slow one. `o start` refuses if the card can't hold the
+Ollama drops a model after 5 minutes idle and reloading `fast` costs ~5s, so `o start` is the
+difference between a 0.6s answer and a 6s one. `o start` refuses if the card can't hold the
 model and tells you what's already on it. Nothing runs in the background.
 
 ---
@@ -91,10 +97,13 @@ raise `--num-ctx`.
 ```python
 from ollama_stack import OllamaClient
 
-client = OllamaClient(num_ctx=32768)
-reply = client.generate("summarise this", "qwen", context=open("notes.md").read())
+client = OllamaClient(num_ctx=32768, think=False)
+reply = client.generate("summarise this", "heavy", context=open("notes.md").read())
 print(reply.text)
 ```
+
+`think` is sent on every request, like `num_ctx` — leave it to the model's own default and a
+small model can spend a second and a half reasoning about `10+10`.
 
 `stream()`, `chat()`, `start`/`stop` via `load()` and `unload()`. Model aliases live in
 `src/ollama_stack/models.py`.
