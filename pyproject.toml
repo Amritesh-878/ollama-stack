@@ -18,7 +18,7 @@ dev = [
 ]
 
 [project.scripts]
-o = "ollama_stack.cli:app"
+o = "ollama_stack.__main__:main"
 
 [build-system]
 requires = ["hatchling"]
