@@ -7,54 +7,10 @@ $ o what is 10+10
 20
 ```
 
-About a second, on a warm model. The point is that asking a local model something should feel
-like running a shell command, not like opening an app.
+No subcommand, no quotes, streamed as it's produced. ~1s on a warm model.
 
-> **Status: early.** `ask`, `audit`, `models` and `which` work today. `setup`, `start`, `stop`,
-> `status`, streaming output and web search are designed but not built — see [Roadmap](#roadmap).
-> Interfaces will change.
-
----
-
-## Why this exists
-
-Ollama's HTTP API has one behaviour that quietly ruins results, and every tool built on it has
-to handle the same thing:
-
-**`num_ctx` defaults to 4096 regardless of what the model advertises, and Ollama does not warn
-you.** A model with a 256K context window gets 4096 tokens unless you pass the option
-explicitly. When your prompt is longer, it is truncated **from the front** — and the model
-answers confidently from whatever survived, with no indication anything was lost.
-
-Measured here: with a ~7000 token prompt at `num_ctx: 4096`, a marker placed at the top of the
-prompt was gone and one at the bottom survived. Asked to report both and to say `MISSING` for
-anything absent, the model reported the bottom value for *both*. It filled the hole rather than
-reporting it.
-
-So this library makes that impossible to get wrong:
-
-- `num_ctx` is set by the client on every request. Callers cannot forget it.
-- `prompt_eval_count` comes back on every reply — the only honest signal for how much of your
-  prompt was actually read.
-- A reply that reached the usable window **raises** instead of returning. So does a reply that
-  omits the count entirely, because unknown is not the same as fine.
-
-If you only take one thing from this repo, take that. It applies whether or not you use this
-tool.
-
----
-
-## Requirements
-
-- [Ollama](https://ollama.com/download) installed and running
-- Python 3.12+
-- [uv](https://docs.astral.sh/uv/) (recommended) or pip
-
-At least one model pulled:
-
-```sh
-ollama pull qwen3.5:4b
-```
+> **Status: early.** Asking, streaming, `start`, `stop`, `status`, `ask`, `audit`, `models`,
+> `which`. `setup`, `config`, web search and images are not built yet. Interfaces will change.
 
 ---
 
@@ -64,82 +20,105 @@ ollama pull qwen3.5:4b
 git clone https://github.com/Amritesh-878/ollama-stack.git
 cd ollama-stack
 uv sync
+uv tool install .     # puts `o` on your PATH
 ```
 
-To get `o` on your PATH everywhere:
-
-```sh
-uv tool install .
-```
+Needs Ollama running, Python 3.12+, and at least one model pulled.
 
 ---
 
 ## Usage
 
 ```sh
-o ask "explain monads"                # ask the default model
-o ask "explain monads" -m coder       # pick a model by alias
+o what is 10+10                       # just ask
+o -m coder write a bash retry loop    # pick a model
+cat main.py | o explain this          # stdin becomes context
 o audit src/thing.py                  # screen one file for defects
-o models                              # list known models
+o models                              # aliases, and which have measurements behind them
 o which coder                         # what an alias resolves to
 ```
 
-### Options
-
 | Flag | Does |
 | ---- | ---- |
-| `-m, --model` | Model alias or raw Ollama tag |
+| `-m, --model` | Alias or raw Ollama tag |
 | `--num-ctx` | Context window to request. Default 32768. |
+| `--no-stream` | Wait for the whole reply |
+| `--stats` | Wall time, token rate, and the pre-flight estimate |
+| `--dry-run` | Print what would be sent. Sends nothing. |
+| `--version` | Print the version |
 
-Token counts go to stderr, so piping stdout stays clean:
+Answer goes to stdout, token counts to stderr — `o write a haiku > poem.txt` stays clean.
+
+### Keeping a model warm
+
+Cold load is ~10s, warm is ~1s, and Ollama drops a model after 5 minutes idle.
 
 ```sh
-o ask "write a haiku" > poem.txt
+o start          # pin the default model in VRAM
+o status         # what's loaded and how much of the card it holds
+o stop           # release it
 ```
 
-### As a library
+`o start` refuses if the card can't hold the model and names what's already on it. Nothing runs
+in the background — Ollama holds the model itself.
+
+### Bare questions starting with a command name
+
+`o status of the economy` runs `status`. Use `o ask "status of the economy"` instead. Reserved
+first words: `setup`, `start`, `stop`, `status`, `ask`, `audit`, `models`, `which`, `config`,
+`implement`.
+
+---
+
+## The num_ctx thing
+
+Ollama's `num_ctx` defaults to 4096 whatever the model advertises. Longer prompts are truncated
+**from the front**, with no warning, and the model answers confidently from what's left. The
+desktop app's *Context length* slider changes that default, so what you get depends on the
+machine.
+
+So this client always sends `num_ctx`, always checks `prompt_eval_count` on the way back, and
+raises rather than returning a reply that reached the window — or one that omits the count,
+since unknown isn't fine. Worth doing whether or not you use this tool.
+
+Two checks: a pre-flight estimate (chars ÷ 4) refuses before sending, exit 2. After streaming,
+the real count is checked — you've already seen the text, so it warns and exits non-zero anyway.
+
+**The usable window is half of `num_ctx`**, so the default refuses at 16384. Generation needs
+room in the same budget. That threshold rests on one measurement; raise `--num-ctx` if it fires
+on a prompt you know is fine.
+
+---
+
+## As a library
 
 ```python
 from ollama_stack import OllamaClient
 
 client = OllamaClient(num_ctx=32768)
 reply = client.generate("summarise this", "qwen", context=open("notes.md").read())
+print(reply.text, reply.prompt_eval_count)
 
-print(reply.text)
-print(reply.prompt_eval_count)   # how much it actually read
+run = client.stream("summarise this", "qwen")
+for chunk in run:
+    print(chunk, end="", flush=True)
+print(run.reply.prompt_eval_count)      # counts arrive with the last chunk
 ```
 
-`client.chat(messages, model, tools=...)` is there too, for multi-turn and function calling.
+Also `chat(messages, model, tools=...)`, and `load()` / `unload()` / `ps()` / `tags()` behind the
+lifecycle commands. `strict=False` returns `reply.suspect_truncation` instead of raising.
 
-Pass `strict=False` if you would rather inspect `reply.suspect_truncation` yourself than have
-it raise.
+Default host is `127.0.0.1`, not `localhost` — Ollama binds IPv4 only, and resolving `localhost`
+cost ~2s per connection here. Pass `host=` if yours is elsewhere.
 
----
-
-## Model aliases
-
-Aliases live in one place (`src/ollama_stack/models.py`) so a rename is a one-line change.
-`o models` marks which ones have measurements behind them and which do not — an unmeasured
-model is one nobody has benchmarked on this workload, not one that does not work.
-
-You are not limited to the list. Any Ollama tag works:
-
-```sh
-o ask "hello" -m llama4:8b
-```
+Aliases live in `src/ollama_stack/models.py`. Any raw tag works too: `o -m llama4:8b hello`.
 
 ---
 
 ## Roadmap
 
-| | |
-| --- | --- |
-| `o setup` | Interactive first run: checks Ollama, reads your VRAM, recommends and pulls models |
-| `o start` / `o stop` | Pin a model in VRAM and release it. Cold load costs ~10s; warm is ~1s. |
-| Streaming | First token in ~200ms instead of waiting for the whole reply |
-| Web search | The model calls out to the web when a question is past its cutoff |
-| Images | `-i photo.png` for vision-capable models |
-| MCP server | Expose local models as tools to MCP-aware clients |
+`o setup` (interactive first run), `o config`, web search past the model's cutoff, `-i` for
+images, `-c` for follow-ups, and an MCP server exposing local models as tools.
 
 ---
 
@@ -147,25 +126,19 @@ o ask "hello" -m llama4:8b
 
 ```sh
 uv sync --all-extras
-uv run ruff check --fix .
-uv run mypy .
-uv run pytest
+uv run ruff check --fix . && uv run mypy . && uv run pytest
 ```
 
-Lint, then typecheck, then tests, in that order. The test suite makes no network calls — the
-Ollama transport is mocked — so it runs anywhere.
+Lint, typecheck, tests, in that order. No network calls in the suite.
 
 ---
 
-## A caveat worth stating plainly
+## One caveat
 
-Small local models are useful and they are not a senior engineer. This tool is built on the
-assumption that **you can trust what a local model says, but never that it is finished.** A
-"nothing found" from `o audit` means nothing at all: the file it passed is unexamined, not
-clean. Read the diff yourself.
+Small local models are useful and they are not a senior engineer. Trust what one says it did,
+never that it's finished. A "nothing found" from `o audit` means the file is unexamined, not
+clean.
 
 ---
-
-## License
 
 MIT — see [LICENSE](LICENSE).
