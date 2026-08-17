@@ -230,25 +230,26 @@ def write_file(values: dict[str, Any], path: Path | None = None) -> Path:
 
 
 def set_value(key: str, raw: str, path: Path | None = None) -> tuple[Any, list[str]]:
-    """Writes one key, leaving every other key in the file exactly as it was."""
+    """Writes one key, keeping every other key the file layer understood."""
     if key not in DEFAULTS:
         raise KeyError(key)
     value, problem = coerce_text(key, raw)
     if problem:
         raise ValueError(problem)
-    stored, _ = read_file(path)
+    # A rewrite drops what read_file could not parse, so those warnings must reach the caller.
+    stored, dropped = read_file(path)
     stored[key] = value
     write_file(stored, path)
-    return value, _advice(load(path=path).values)
+    return value, dropped + _advice(load(path=path).values)
 
 
-def unset_value(key: str, path: Path | None = None) -> bool:
+def unset_value(key: str, path: Path | None = None) -> tuple[bool, list[str]]:
     """Reverts one key to the built-in default by removing it, not by writing the default in."""
     if key not in DEFAULTS:
         raise KeyError(key)
-    stored, _ = read_file(path)
+    stored, dropped = read_file(path)
     if key not in stored:
-        return False
+        return False, dropped
     del stored[key]
     write_file(stored, path)
-    return True
+    return True, dropped

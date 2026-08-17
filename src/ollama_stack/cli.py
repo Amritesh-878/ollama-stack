@@ -222,7 +222,7 @@ def config_set(key: str, value: str) -> None:
 def config_unset(key: str) -> None:
     """Revert one setting to the built-in default by removing it from the file."""
     try:
-        removed = config.unset_value(key)
+        removed, dropped = config.unset_value(key)
     except KeyError:
         typer.secho(f"error: unknown key {key!r}", fg=typer.colors.RED, err=True)
         raise typer.Exit(2) from None
@@ -233,6 +233,8 @@ def config_unset(key: str) -> None:
     typer.echo(
         f"{key} back to the built-in default: {default}" if removed else f"{key} was not set"
     )
+    for note in dropped:
+        typer.secho(f"warning: {note}", fg=typer.colors.YELLOW, err=True)
 
 
 @app.command()

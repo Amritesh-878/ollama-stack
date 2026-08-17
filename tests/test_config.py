@@ -76,12 +76,23 @@ def test_a_flag_that_was_not_given_does_not_override(monkeypatch: pytest.MonkeyP
 def test_set_read_unset_read_round_trips() -> None:
     config.set_value("fast_model", "gemma4:e4b")
     assert config.load().values["fast_model"] == "gemma4:e4b"
-    assert config.unset_value("fast_model") is True
+    assert config.unset_value("fast_model")[0] is True
     assert config.load().values["fast_model"] == config.DEFAULTS["fast_model"]
 
 
 def test_unsetting_a_key_that_was_never_set_says_so() -> None:
-    assert config.unset_value("num_ctx") is False
+    assert config.unset_value("num_ctx")[0] is False
+
+
+def test_a_write_says_what_it_dropped_rather_than_deleting_it_quietly(
+    tmp_path: Path,
+) -> None:
+    """A rewrite keeps only keys the file layer parsed, so a hand-edited line can vanish."""
+    target = tmp_path / "config.toml"
+    target.write_text('num_ctx = 16384\nmy_future_key = "keep me"\n', encoding="utf-8")
+    _, notes = config.set_value("stream", "false", target)
+    assert any("my_future_key" in note for note in notes)
+    assert "my_future_key" not in target.read_text(encoding="utf-8")
 
 
 def test_writing_one_key_leaves_the_others_alone() -> None:
