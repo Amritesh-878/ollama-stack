@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import platform
 import shutil
 import subprocess
@@ -11,7 +12,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from ollama_stack import config
-from ollama_stack.client import OllamaClient, OllamaError, prompt_budget
+from ollama_stack.client import OllamaClient, OllamaError
 from ollama_stack.hardware import Gpu, Model, Tier, detect, shortfall_mib, tier_for
 
 PULL_TIMEOUT = 3600
@@ -291,7 +292,14 @@ def repo_root() -> Path | None:
 
 
 def resolve_on_path() -> str | None:
-    return shutil.which("o")
+    """PATH minus this venv: `o` inside .venv is not `o` in the shell they open next."""
+    here = {Path(sys.prefix, sub).resolve() for sub in ("Scripts", "bin")}
+    outside = [
+        entry
+        for entry in os.environ.get("PATH", "").split(os.pathsep)
+        if entry and Path(entry).resolve() not in here
+    ]
+    return shutil.which("o", path=os.pathsep.join(outside))
 
 
 def global_install(report: Report) -> None:
@@ -341,16 +349,18 @@ def closing(report: Report, settings_num_ctx: int) -> None:
     if report.failures:
         say(f"{len(report.failures)} step(s) did not complete. Everything else is ready.")
         say()
-    say(f"Attached files and pipes are refused past {prompt_budget(settings_num_ctx)} tokens.")
-    say("  Raise it for one command with --num-ctx, or for good with `o config set num_ctx`.")
-    say()
     if not report.o_on_path:
-        # Telling someone who declined the PATH install to type `o` gives them a broken command.
-        say("Setup done. From this folder, type:  uv run o tutorial")
-    elif report.path_changed:
-        say("Setup done. Open a new terminal and type:  o tutorial")
+        # `o` lives only in .venv here, so `uv run` is the only spelling that works.
+        say("Setup done. `o` is not on your PATH, so run it from this folder:")
+        say()
+        say("    uv run o tutorial")
+        return
+    if report.path_changed:
+        say("Setup done. Open a new terminal, then run:")
     else:
-        say("Setup done. Type:  o tutorial")
+        say("Setup done. Run:")
+    say()
+    say("    o tutorial")
 
 
 def run(answers: Answers) -> int:

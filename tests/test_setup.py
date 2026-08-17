@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import ast
+import os
 import sys
 from collections.abc import Iterator
 from pathlib import Path
@@ -213,14 +214,11 @@ def test_nothing_above_ascii_is_written_to_a_cp1252_console(
     assert all(ord(char) < 128 for char in out), "non-ASCII reached a cp1252 console"
 
 
-def test_the_closing_line_derives_the_window_rather_than_hard_coding_it(
-    capsys: pytest.CaptureFixture[str],
-) -> None:
-    """TASK-016 moves this number, and it must move in one place."""
-    from ollama_stack.client import prompt_budget
-
-    setup.run(FULL)
-    assert str(prompt_budget(config.load().num_ctx)) in capsys.readouterr().out
+def test_the_wizard_never_hard_codes_a_context_window_number() -> None:
+    """TASK-016 moves these, and a literal here would go stale silently."""
+    source = Path(setup.__file__).read_text(encoding="utf-8")
+    for stale in ("16384", "24576", "32768"):
+        assert stale not in source, stale
 
 
 def test_setup_ends_with_one_instruction_and_it_is_the_tutorial(
@@ -333,7 +331,9 @@ def test_a_path_changing_install_asks_for_a_new_terminal(
     report = setup.Report()
     report.path_changed = True
     setup.closing(report, 32768)
-    assert "Open a new terminal" in capsys.readouterr().out
+    out = capsys.readouterr().out
+    assert "Open a new terminal" in out
+    assert out.strip().splitlines()[-1].strip() == "o tutorial"
 
 
 def test_bootstrap_help_prints_usage_and_installs_nothing(
@@ -346,3 +346,15 @@ def test_bootstrap_help_prints_usage_and_installs_nothing(
     out = capsys.readouterr().out
     assert "usage: python bootstrap.py" in out
     assert "Environment ready" not in out
+
+
+def test_the_venv_copy_of_o_does_not_count_as_being_on_path(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """A friend said Y to the PATH install, was told `o tutorial`, and it did not exist."""
+    scripts = tmp_path / ("Scripts" if os.name == "nt" else "bin")
+    scripts.mkdir()
+    (scripts / ("o.exe" if os.name == "nt" else "o")).write_text("", encoding="utf-8")
+    monkeypatch.setattr(sys, "prefix", str(tmp_path))
+    monkeypatch.setenv("PATH", str(scripts))
+    assert setup.resolve_on_path() is None
