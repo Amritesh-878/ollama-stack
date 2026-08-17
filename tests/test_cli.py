@@ -130,11 +130,26 @@ def test_every_subcommand_is_reserved_so_none_can_be_eaten_as_a_prompt() -> None
 def test_help_documents_the_reserved_word_rule_in_actionable_words(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    with pytest.raises(SystemExit):
-        main(["--help"])
+    """The bare path owns --help now: typer cannot list flags it does not define."""
+    assert main(["--help"]) == 0
     out = " ".join(capsys.readouterr().out.split())
     assert "runs that command instead" in out
     assert 'o ask "status of the economy"' in out
+
+
+def test_help_lists_every_bare_path_flag_and_every_subcommand(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """A flag missing from --help is a feature nobody finds."""
+    from typer.main import get_group
+
+    assert main(["-h"]) == 0
+    out = capsys.readouterr().out
+    for flag in ("-m", "--num-ctx", "--think", "-w", "--no-web", "--no-stream", "--stats",
+                 "--dry-run", "--version"):
+        assert flag in out, flag
+    for name in get_group(app).commands:
+        assert name in out, name
 
 
 @responses.activate

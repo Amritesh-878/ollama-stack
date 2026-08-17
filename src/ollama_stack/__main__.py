@@ -38,6 +38,52 @@ USAGE = """usage: o <question>          ask the default model, no quotes needed
        o ask "<question>"    when the question starts with a subcommand name
        o --help              subcommands and flags"""
 
+# Hand-written rather than typer's: typer owns the subcommands but not the bare-path flags, so
+# its screen can only list half of them and buries the rest in an epilog paragraph.
+HELP = """usage: o <question>              ask a local model, no quotes needed
+       o <command> [options]     run a command
+       o ask "<question>"        when the question starts with a command name
+
+Ask a local model something from the terminal.
+
+commands:
+  start [-m TAG]         pin a model in VRAM so the next question is fast
+  stop [-m TAG]          release it and give the card back
+  status                 what is loaded, how much VRAM, how long it stays
+  ask "<question>"       ask, when the question starts with a command name
+  audit <file>           have a model read one file and report defects
+  models                 list the model aliases and which have measurements
+  which <alias>          show what an alias resolves to
+  config                 show settings and where each one came from
+  config set <k> <v>     change a setting
+  config unset <k>       revert a setting to its default
+  setup                  re-run the first-run wizard
+  tutorial               nine guided steps, run on your own machine
+
+options:
+  -m, --model TAG        alias like `heavy`, or any Ollama tag
+      --num-ctx N        context window to request (default 32768)
+      --think            reason before answering; slower, better on hard questions
+  -w, --web              search the web before answering
+      --no-web           never search
+      --no-stream        wait for the whole reply instead of streaming
+      --stats            timings, token counts, and the pre-flight estimate
+      --dry-run          show what would be sent, send nothing
+      --version          print the version
+  -h, --help             show this
+
+examples:
+  o what is 10+10
+  o -m heavy explain this stack trace
+  cat main.py | o explain this
+  o ask "status of the roman empire"
+
+A question whose FIRST word is a command runs that command instead, so
+`o status of the economy` reports what is loaded rather than answering.
+For those, quote it: o ask "status of the economy"
+
+https://github.com/Amritesh-878/ollama-stack"""
+
 
 class UsageError(Exception):
     """The argv is malformed, which is the user's problem and not Ollama's."""
@@ -333,7 +379,10 @@ def main(argv: list[str] | None = None) -> int:
 
         print(__version__)
         return 0
-    if words and (words[0] in RESERVED or words[0] in HELP_FLAGS):
+    if words and words[0] in HELP_FLAGS:
+        print(HELP)
+        return 0
+    if words and words[0] in RESERVED:
         return _subcommand(args)
     if not words:
         print(USAGE, file=sys.stderr)
