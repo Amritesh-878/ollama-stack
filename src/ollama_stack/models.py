@@ -35,11 +35,34 @@ HEAVY_ALIAS = "heavy"
 DEFAULT_ALIAS = FAST_ALIAS
 
 
+# Config repoints a role here rather than editing REGISTRY, so the built-in stays visible.
+_ROLE_TAGS: dict[str, str] = {}
+
+
+def set_role_tag(alias: str, tag: str) -> None:
+    """Point an alias at a different tag than the registry ships with."""
+    if alias in REGISTRY and tag:
+        _ROLE_TAGS[alias] = tag
+
+
+def clear_role_tags() -> None:
+    _ROLE_TAGS.clear()
+
+
+def _by_tag(tag: str) -> ModelSpec | None:
+    for spec in REGISTRY.values():
+        if spec.tag == tag:
+            return spec
+    return None
+
+
 def resolve(name: str) -> ModelSpec:
     """Turn an alias or a raw Ollama tag into a spec, preferring aliases."""
     if name in REGISTRY:
-        return REGISTRY[name]
-    for spec in REGISTRY.values():
-        if spec.tag == name:
+        spec = REGISTRY[name]
+        tag = _ROLE_TAGS.get(name, spec.tag)
+        if tag == spec.tag:
             return spec
-    return ModelSpec(name, "not in the registry", False)
+        # A repointed role is unmeasured until someone measures the tag it now points at.
+        return _by_tag(tag) or ModelSpec(tag, f"{name}, repointed by config", False)
+    return _by_tag(name) or ModelSpec(name, "not in the registry", False)

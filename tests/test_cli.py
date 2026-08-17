@@ -123,7 +123,7 @@ def test_every_subcommand_is_reserved_so_none_can_be_eaten_as_a_prompt() -> None
 
     registered = set(get_group(app).commands)
     assert registered <= RESERVED
-    assert RESERVED - registered == {"setup", "config", "implement"}
+    assert RESERVED - registered == {"setup", "implement"}
 
 
 def test_help_documents_the_reserved_word_rule_in_actionable_words(
@@ -466,9 +466,9 @@ def _modules(code: str) -> set[str]:
 
 
 def test_the_bare_path_imports_nothing_outside_its_allowlist() -> None:
-    """The allowlist is whatever dataclasses and typing already cost, plus this package."""
+    """The allowlist is what the settings layer already costs, plus this package, and no more."""
     baseline = _modules("pass")
-    reference = "from __future__ import annotations; import dataclasses, typing"
+    reference = "from __future__ import annotations; import dataclasses, typing, tomllib, pathlib"
     allowed = (_modules(reference) - baseline) | {"ollama_stack"}
     bare = _modules(
         "import sys; sys.argv = ['o', '--dry-run', 'what', 'is', '10+10'];"

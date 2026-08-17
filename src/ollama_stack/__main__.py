@@ -7,10 +7,11 @@ import time
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
-from ollama_stack.models import DEFAULT_ALIAS, DEFAULT_NUM_CTX
+from ollama_stack.models import DEFAULT_ALIAS
 
 if TYPE_CHECKING:
     from ollama_stack.client import OllamaClient, Reply, StreamRun
+    from ollama_stack.config import Settings
     from ollama_stack.tools import SearchOutcome
 
 RESERVED = frozenset(
@@ -46,8 +47,9 @@ class Options:
     """Everything the bare path can be told, parsed without argparse or typer."""
 
     model: str = DEFAULT_ALIAS
-    num_ctx: int = DEFAULT_NUM_CTX
-    stream: bool = True
+    # None means "not given on the command line", so config gets its turn in the precedence.
+    num_ctx: int | None = None
+    stream: bool | None = None
     stats: bool = False
     dry_run: bool = False
     version: bool = False
@@ -141,18 +143,19 @@ def _subcommand(argv: list[str]) -> int:
     return 0
 
 
-def _dry_run(opts: Options, prompt: str, context: str) -> int:
+def _dry_run(opts: Options, prompt: str, context: str, settings: Settings) -> int:
     from ollama_stack.client import ContextTruncationError, OllamaClient, estimate_tokens
     from ollama_stack.models import resolve
 
-    client = OllamaClient(num_ctx=opts.num_ctx, think=opts.think)
+    num_ctx = _num_ctx(opts, settings)
+    client = OllamaClient(num_ctx=num_ctx, think=opts.think)
     full = f"{context}\n\n{prompt}".strip() if context else prompt
     spec = resolve(opts.model)
     print(f"model     {opts.model} -> {spec.tag}")
-    print(f"num_ctx   {opts.num_ctx}")
+    print(f"num_ctx   {num_ctx} (from {_where(opts, settings)})")
     print(f"window    {client.usable_window} (refused at or above)")
     print(f"estimate  {estimate_tokens(full)} prompt tokens")
-    print(f"stream    {'on' if opts.stream else 'off'}")
+    print(f"stream    {'on' if _stream(opts, settings) else 'off'}")
     print(f"think     {'on' if opts.think else 'off'}")
     print(f"web       {_WEB_LABELS[opts.web]}")
     try:
@@ -197,12 +200,25 @@ def _status_line(
     print(f"[{' | '.join(parts)}]", file=sys.stderr)
 
 
+def _num_ctx(opts: Options, settings: Settings) -> int:
+    return opts.num_ctx if opts.num_ctx is not None else settings.num_ctx
+
+
+def _stream(opts: Options, settings: Settings) -> bool:
+    return opts.stream if opts.stream is not None else settings.stream
+
+
+def _where(opts: Options, settings: Settings) -> str:
+    return "flag" if opts.num_ctx is not None else settings.sources["num_ctx"]
+
+
 def _searching(
     client: OllamaClient,
     opts: Options,
     prompt: str,
     context: str,
     started: float,
+    settings: Settings,
 ) -> tuple[SearchOutcome, float | None]:
     """The tool loop, taken whenever search is not explicitly forbidden."""
     from ollama_stack.search import DuckDuckGo
@@ -210,11 +226,12 @@ def _searching(
 
     first: list[float] = []
     held: list[str] = []
+    streaming = _stream(opts, settings)
 
     def write(piece: str) -> None:
         if not first:
             first.append(time.perf_counter() - started)
-        if opts.stream:
+        if streaming:
             sys.stdout.write(piece)
             sys.stdout.flush()
         else:
@@ -245,6 +262,7 @@ def _searching(
 
 def run_query(opts: Options, prompt: str, context: str = "") -> int:
     """One implementation for the bare path and for `o ask`, so they cannot behave differently."""
+    from ollama_stack import config
     from ollama_stack.client import (
         ContextTruncationError,
         OllamaClient,
@@ -252,9 +270,13 @@ def run_query(opts: Options, prompt: str, context: str = "") -> int:
         estimate_tokens,
     )
 
+    settings = config.load()
+    config.apply(settings)
+    for warning in settings.warnings:
+        print(f"config: {warning}", file=sys.stderr)
     if opts.dry_run:
-        return _dry_run(opts, prompt, context)
-    client = OllamaClient(num_ctx=opts.num_ctx, think=opts.think)
+        return _dry_run(opts, prompt, context, settings)
+    client = OllamaClient(num_ctx=_num_ctx(opts, settings), think=opts.think)
     started = time.perf_counter()
     first_word: float | None = None
     run: StreamRun | None = None
@@ -262,11 +284,11 @@ def run_query(opts: Options, prompt: str, context: str = "") -> int:
     estimate = estimate_tokens(f"{context}\n\n{prompt}".strip() if context else prompt)
     try:
         if opts.web is not False:
-            outcome, first_word = _searching(client, opts, prompt, context, started)
+            outcome, first_word = _searching(client, opts, prompt, context, started, settings)
             reply, run = outcome.reply, outcome.last_run
             # The conversation grew by whatever search returned, so the original estimate is stale.
             estimate, searched = outcome.prompt_estimate, outcome.searches
-        elif opts.stream:
+        elif _stream(opts, settings):
             run = client.stream(prompt, opts.model, context=context)
             try:
                 for chunk in run:

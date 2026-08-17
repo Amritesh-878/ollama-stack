@@ -226,10 +226,12 @@ class OllamaClient:
         )
         return StreamRun(self, response, spec.tag, started)
 
-    def load(self, model: str) -> None:
+    def load(self, model: str, keep_alive: int = PIN) -> None:
         """The one path exempt from the count check: a load evaluates nothing, so none exists."""
         spec = resolve(model)
-        body = self._post("/api/generate", {"model": spec.tag, "prompt": ""}, keep_alive=PIN)
+        body = self._post(
+            "/api/generate", {"model": spec.tag, "prompt": ""}, keep_alive=keep_alive
+        )
         reason = body.get("done_reason")
         if reason is not None and reason != "load":
             raise OllamaError(f"asked {spec.tag} to load and it reported {reason!r} instead")

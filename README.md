@@ -47,6 +47,9 @@ cat main.py | o explain this          # pipe a file in as context
 | `--dry-run` | Show what would be sent, send nothing |
 | `--version` | Print the version |
 
+Defaults for most of these come from `o config`, and a flag always wins — see
+[Settings](#settings).
+
 The answer goes to stdout and the token counts to stderr, so `o write a haiku > poem.txt` gives
 you a clean file.
 
@@ -99,10 +102,44 @@ runs `status`. Use `o ask "status of the economy"` for those.
 | `o audit file.py` | Have a model read one file and report defects |
 | `o models` | List the aliases |
 | `o which coder` | Show what an alias resolves to |
+| `o config` | Show your settings and where each one came from |
 
 Ollama drops a model after 5 minutes idle and reloading `fast` costs ~5s, so `o start` is the
 difference between a 0.6s answer and a 6s one. `o start` refuses if the card can't hold the
 model and tells you what's already on it. Nothing runs in the background.
+
+---
+
+## Settings
+
+`o config` prints what's in effect and where each value came from. Nothing is written until you
+set something.
+
+```sh
+o config                              # show everything
+o config set fast_model gemma4:e4b    # change the model a bare question uses
+o config set num_ctx 16384
+o config unset num_ctx                # back to the built-in default
+```
+
+Settings live in `%APPDATA%\ollama-stack\config.toml` on Windows and
+`~/.config/ollama-stack/config.toml` elsewhere — outside the repo, so `git pull` can't clobber
+them.
+
+**Four places a value can come from. Highest wins:**
+
+| | | |
+| - | --- | --- |
+| 1 | Command-line flag | `o --num-ctx 16384 ...` |
+| 2 | Environment variable | `OLLAMA_STACK_NUM_CTX=16384` |
+| 3 | Config file | `num_ctx = 16384` |
+| 4 | Built-in default | `32768` |
+
+Keys: `fast_model`, `heavy_model`, `num_ctx`, `keep_alive`, `search_provider`, `search_api_key`,
+`stream`. `search_api_key` is never printed in full.
+
+Setting `num_ctx` below 8192 is allowed and warns, because it is a measured floor rather than a
+preference — see below.
 
 ---
 
@@ -137,8 +174,8 @@ small model can spend a second and a half reasoning about `10+10`.
 
 ## Coming
 
-Interactive setup, saved config, images, follow-up questions, and an MCP server so editors can
-call local models as tools.
+Interactive setup, images, follow-up questions, and an MCP server so editors can call local
+models as tools.
 
 ---
 

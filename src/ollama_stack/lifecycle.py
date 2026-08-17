@@ -9,7 +9,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any
 
-from ollama_stack.client import OllamaClient, OllamaError
+from ollama_stack.client import PIN, OllamaClient, OllamaError
 from ollama_stack.models import resolve
 
 SMI = "nvidia-smi"
@@ -174,7 +174,7 @@ def _refuse_if_it_cannot_fit(client: OllamaClient, tag: str, before: list[Reside
     )
 
 
-def start(client: OllamaClient, alias: str) -> StartResult:
+def start(client: OllamaClient, alias: str, keep_alive: int = PIN) -> StartResult:
     """Pins a model, refusing first if the card plainly cannot hold it."""
     tag = resolve(alias).tag
     before = residents(client)
@@ -184,7 +184,7 @@ def start(client: OllamaClient, alias: str) -> StartResult:
     _refuse_if_it_cannot_fit(client, tag, before)
     # A load-only reply carries no durations at all, so time to ready is the caller's wall clock.
     started = time.perf_counter()
-    client.load(alias)
+    client.load(alias, keep_alive=keep_alive)
     seconds = time.perf_counter() - started
     after = next((r for r in residents(client) if r.name == tag), None)
     return StartResult(tag, False, seconds, after, nvidia_vram())
