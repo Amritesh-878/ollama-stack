@@ -350,7 +350,7 @@ def closing(report: Report, settings_num_ctx: int) -> None:
         say(f"{len(report.failures)} step(s) did not complete. Everything else is ready.")
         say()
     if not report.o_on_path:
-        # `o` lives only in .venv here, so `uv run` is the only spelling that works.
+        # `o` exists only inside .venv here, so `uv run` is the only spelling that works.
         say("Setup done. `o` is not on your PATH, so run it from this folder:")
         say()
         say("    uv run o tutorial")
