@@ -18,8 +18,8 @@ class ModelSpec:
 
 REGISTRY: dict[str, ModelSpec] = {
     "fast": ModelSpec("qwen3.5:4b", "hot path: bare questions and `o start`", False),
-    "heavy": ModelSpec("qwen3.8:27b", "audits and long work; vision, 256K advertised", False),
-    "qwen": ModelSpec("qwen3.8:27b", "the heavy model under its earlier alias", False),
+    "heavy": ModelSpec("qwen3.8:27b", "audits and long work; vision, 256K advertised", True),
+    "qwen": ModelSpec("qwen3.8:27b", "the heavy model under its earlier alias", True),
     "coder": ModelSpec("qwen3-coder:30b", "agentic coding; the only measured implementer", True),
     "dev": ModelSpec("devstral:24b", "multi-file agentic work", False),
     "think": ModelSpec("deepseek-r1:32b", "open-ended reasoning, NOT defect hunting", True),
@@ -27,7 +27,7 @@ REGISTRY: dict[str, ModelSpec] = {
     "deepseek": ModelSpec(
         "deepseek-coder-v2:16b-lite-instruct-q4_0", "quick code snippets", False
     ),
-    "qwen36": ModelSpec("qwen3.6:27b", "previous daily driver, kept for A/B", False),
+    "qwen36": ModelSpec("qwen3.6:27b", "previous daily driver, benchmarked against heavy", True),
 }
 
 FAST_ALIAS = "fast"

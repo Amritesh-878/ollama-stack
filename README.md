@@ -184,6 +184,12 @@ models as tools.
 A local model is useful and it is not a senior engineer. `o audit` finding nothing means the
 file is unexamined, not clean.
 
+**Measured, so you can calibrate.** On a real file with three known defects that lost real users'
+work, `qwen3.8:27b` named **one of the three** on each of three runs — and so did every other
+model tried, including `qwen3.6:27b`, `qwen3-coder:30b` and `deepseek-r1:32b`. **One of the three
+has never been found by any model.** They tend to find the obvious defect, explain it well, and
+stop. Treat a report as a starting point, never as coverage.
+
 ---
 
 ## Development

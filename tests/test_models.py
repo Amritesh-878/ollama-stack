@@ -51,7 +51,7 @@ def test_an_unknown_tag_is_passed_through_as_unmeasured() -> None:
     assert not spec.measured
 
 
-def test_neither_role_is_flagged_measured() -> None:
-    """TASK-004 measured latency and capability. Quality is TASK-009 and is untouched."""
+def test_only_the_heavy_role_is_flagged_measured() -> None:
+    """TASK-009 benchmarked heavy for quality; the fast role has latency figures only."""
+    assert REGISTRY[HEAVY_ALIAS].measured
     assert not REGISTRY[FAST_ALIAS].measured
-    assert not REGISTRY[HEAVY_ALIAS].measured
