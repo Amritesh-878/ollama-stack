@@ -330,3 +330,27 @@ def test_asking_for_the_reply_before_the_stream_finishes_is_an_error() -> None:
     run = OllamaClient().stream("p", "qwen")
     with pytest.raises(OllamaError, match="has not finished"):
         _ = run.reply
+
+
+@responses.activate
+def test_a_model_that_is_not_pulled_says_how_to_pull_it() -> None:
+    """The first thing a new user hits, and raise_for_status throws the explanation away."""
+    responses.add(
+        responses.POST, GENERATE, json={"error": "model 'qwen3.5:4b' not found"}, status=404
+    )
+    with pytest.raises(OllamaError, match=r"ollama pull qwen3\.5:4b"):
+        OllamaClient().generate("hi", "fast")
+
+
+@responses.activate
+def test_another_http_error_still_surfaces_ollamas_own_words() -> None:
+    responses.add(responses.POST, GENERATE, json={"error": "out of memory"}, status=500)
+    with pytest.raises(OllamaError, match="out of memory"):
+        OllamaClient().generate("hi", "fast")
+
+
+@responses.activate
+def test_an_http_error_with_no_usable_body_falls_back_to_the_status() -> None:
+    responses.add(responses.POST, GENERATE, body="<html>gateway</html>", status=502)
+    with pytest.raises(OllamaError, match="failed against"):
+        OllamaClient().generate("hi", "fast")

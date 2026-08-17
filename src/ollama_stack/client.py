@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 import time
 from collections.abc import Iterator
 from dataclasses import dataclass
@@ -18,6 +19,7 @@ DEFAULT_TIMEOUT = 600
 PROBE_TIMEOUT = 10
 PIN = -1
 RELEASE = 0
+MISSING_MODEL_RE = re.compile(r"model \"?'?([^'\"]+?)'?\"? not found")
 
 
 class OllamaError(RuntimeError):
@@ -122,9 +124,29 @@ class OllamaClient:
                 f"{self.host}{path}", json=payload, timeout=self.timeout, stream=stream
             )
             response.raise_for_status()
+        except requests.HTTPError as exc:
+            raise self._http_error(exc, path) from exc
         except requests.RequestException as exc:
             raise OllamaError(f"{path} failed against {self.host}: {exc}") from exc
         return response
+
+    def _http_error(self, exc: requests.HTTPError, path: str) -> OllamaError:
+        """raise_for_status discards the body, and the body is where Ollama says what is wrong."""
+        detail = ""
+        if exc.response is not None:
+            try:
+                detail = str(exc.response.json().get("error", "")).strip()
+            except ValueError:
+                detail = ""
+        if not detail:
+            return OllamaError(f"{path} failed against {self.host}: {exc}")
+        missing = MISSING_MODEL_RE.search(detail)
+        if missing:
+            return OllamaError(
+                f"{detail}. Pull it first: `ollama pull {missing.group(1)}`, "
+                "or run `o models` to see the aliases."
+            )
+        return OllamaError(f"{path} failed against {self.host}: {detail}")
 
     def _post(
         self, path: str, payload: dict[str, Any], *, keep_alive: int | None = None
