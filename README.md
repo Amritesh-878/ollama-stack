@@ -15,15 +15,48 @@ No subcommand, no quotes. The answer streams as it's written, in about a second 
 
 ## Setup
 
-You need [Ollama](https://ollama.com/download) running, Python 3.12+, and one model pulled
-(`ollama pull qwen3.5:4b`).
+You need [Ollama](https://ollama.com/download) installed. Everything else the setup does for you —
+it finds your GPU, recommends models that will actually fit it, pulls them, writes the config, and
+finishes by timing a real question on your machine.
 
 ```sh
 git clone https://github.com/Amritesh-878/ollama-stack.git
 cd ollama-stack
-uv sync
-uv tool install .     # puts `o` on your PATH
+py bootstrap.py          # Windows
+python3 bootstrap.py     # macOS and Linux
 ```
+
+`bootstrap.py` uses only the standard library, so it runs before anything is installed. It will
+offer to install [uv](https://docs.astral.sh/uv/) and, if your Python is older than 3.12, offer to
+let uv fetch one. Both are asked first, and declining uv falls back to `venv` and `pip`.
+
+**On Windows use `py`, not `python`.** Windows ships a `python.exe` in `WindowsApps` that is a
+0-byte stub: it opens the Microsoft Store and runs nothing. The `py` launcher comes with a real
+Python install and is never a stub.
+
+When it finishes, **open a new terminal** — PATH is read when a shell starts, so the one you ran
+setup in cannot see `o` yet — and run:
+
+```sh
+o tutorial
+```
+
+Nine steps, each one a real command run against your machine, reporting your numbers rather than
+ours. It changes nothing and you can quit or re-run it at any point.
+
+### Just want to try it
+
+If you already have `uv`, you can skip the clone:
+
+```sh
+uvx --from git+https://github.com/Amritesh-878/ollama-stack o setup
+```
+
+This needs uv already installed, which is the barrier `bootstrap.py` exists to remove — so it is
+the shortcut, not the main path.
+
+> **Windows is the only platform this has been tested on.** The macOS and Linux paths are written
+> and unverified.
 
 ---
 
@@ -95,6 +128,8 @@ runs `status`. Use `o ask "status of the economy"` for those.
 
 | | |
 | --- | --- |
+| `o setup` | Re-run the wizard: hardware, models, config, and a verification run |
+| `o tutorial` | Nine steps, run for real. Changes nothing and can be repeated |
 | `o start` | Pin a model in VRAM so the next question is fast |
 | `o stop` | Unload it and give the card back |
 | `o status` | What's loaded, how much VRAM it's using, how long it stays |

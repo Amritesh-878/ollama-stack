@@ -17,6 +17,7 @@ if TYPE_CHECKING:
 RESERVED = frozenset(
     {
         "setup",
+        "tutorial",
         "start",
         "stop",
         "status",

@@ -23,8 +23,7 @@ app = typer.Typer(
         "`o config`, and the precedence is flag > env (OLLAMA_STACK_*) > file > built-in. A "
         "question whose FIRST word is one of the commands above runs that command instead, so "
         "`o status of the economy` reports what is loaded - ask it as a question with "
-        '`o ask "status of the economy"`. setup and implement are reserved the same way '
-        "before they exist."
+        '`o ask "status of the economy"`. implement is reserved the same way before it exists.'
     ),
 )
 
@@ -257,6 +256,40 @@ def which(name: str) -> None:
     typer.echo(f"{name} -> {spec.tag} ({spec.summary})")
     if not spec.measured:
         typer.secho("no measurements behind this model", fg=typer.colors.YELLOW, err=True)
+
+
+@app.command()
+def setup(
+    fast_model: str | None = typer.Option(None, "--fast-model", help="Tag for the fast role."),
+    heavy_model: str | None = typer.Option(None, "--heavy-model", help="Tag for the heavy role."),
+    search_provider: str | None = typer.Option(None, "--search-provider", help="Search backend."),
+    install: bool | None = typer.Option(None, "--install/--no-install", help="Put `o` on PATH."),
+    no_pull: bool = typer.Option(False, "--no-pull", help="Choose models but download nothing."),
+) -> None:
+    """First-run wizard: hardware, models, config, and a verification run on your machine."""
+    from ollama_stack import setup as wizard
+
+    answers = wizard.Answers(
+        fast_model=fast_model,
+        heavy_model=heavy_model,
+        search_provider=search_provider,
+        install=install,
+        pull=not no_pull,
+    )
+    try:
+        code = wizard.run(answers)
+    except wizard.MissingAnswerError as exc:
+        typer.secho(f"error: {exc}", fg=typer.colors.RED, err=True)
+        raise typer.Exit(2) from exc
+    raise typer.Exit(code)
+
+
+@app.command()
+def tutorial() -> None:
+    """Nine steps, run for real against your machine. Changes nothing and can be re-run."""
+    from ollama_stack import tutorial as guide
+
+    raise typer.Exit(guide.run())
 
 
 if __name__ == "__main__":

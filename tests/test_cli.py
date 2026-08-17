@@ -123,7 +123,8 @@ def test_every_subcommand_is_reserved_so_none_can_be_eaten_as_a_prompt() -> None
 
     registered = set(get_group(app).commands)
     assert registered <= RESERVED
-    assert RESERVED - registered == {"setup", "implement"}
+    assert {"setup", "tutorial"} <= registered
+    assert RESERVED - registered == {"implement"}
 
 
 def test_help_documents_the_reserved_word_rule_in_actionable_words(

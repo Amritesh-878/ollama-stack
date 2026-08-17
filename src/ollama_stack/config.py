@@ -158,10 +158,14 @@ def _advice(values: dict[str, Any]) -> list[str]:
     notes: list[str] = []
     num_ctx = int(values["num_ctx"])
     if num_ctx < LOW_NUM_CTX:
+        # Derived, not restated: the threshold moves in client.py and this text follows it.
+        from ollama_stack.client import usable_window
+
         notes.append(
             f"num_ctx is {num_ctx}. Ollama truncates from the FRONT without warning, and the "
-            f"client refuses any prompt reaching {num_ctx // 2} tokens, so attached files and "
-            "search results will be cut or refused. 32768 is a measured floor, not a preference."
+            f"client refuses any prompt reaching {usable_window(num_ctx)} tokens, so attached "
+            "files and search results will be cut or refused. 32768 is a measured floor, not a "
+            "preference."
         )
     known = {spec.tag for spec in REGISTRY.values()}
     for key in ("fast_model", "heavy_model"):

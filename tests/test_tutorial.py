@@ -1,0 +1,130 @@
+"""The tutorial is the first thing a stranger runs, so it must not hang, crash, or change state."""
+
+from __future__ import annotations
+
+import subprocess
+from collections.abc import Iterator
+from pathlib import Path
+
+import pytest
+
+from ollama_stack import config, tutorial
+from ollama_stack.tutorial import LESSONS, Lesson
+
+
+@pytest.fixture(autouse=True)
+def _isolated(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Iterator[None]:
+    """Stub the subprocess rather than `execute`, so the real one is still under test."""
+    monkeypatch.setenv(config.PATH_ENV, str(tmp_path / "config.toml"))
+    monkeypatch.setattr(
+        "ollama_stack.tutorial.subprocess.run",
+        lambda *args, **kwargs: subprocess.CompletedProcess([], 0),
+    )
+    yield
+
+
+def _answers(monkeypatch: pytest.MonkeyPatch, replies: list[str]) -> None:
+    queue = list(replies)
+    monkeypatch.setattr("builtins.input", lambda prompt="": queue.pop(0) if queue else "q")
+
+
+def test_no_terminal_prints_the_steps_and_exits_zero(capsys: pytest.CaptureFixture[str]) -> None:
+    """Piping `o tutorial` must not block on input nobody can supply."""
+    assert tutorial.run() == 0
+    out = capsys.readouterr().out
+    for lesson in LESSONS:
+        assert lesson.shown in out
+
+
+def test_there_are_nine_steps_and_they_start_at_status_and_end_at_stop() -> None:
+    assert len(LESSONS) == 9
+    assert LESSONS[0].argv == ["status"]
+    assert LESSONS[-1].argv == ["stop"]
+
+
+def test_it_ends_on_stop_so_the_last_thing_taught_is_giving_the_card_back() -> None:
+    assert LESSONS[-1].key == "C9"
+    assert "card is yours again" in LESSONS[-1].teaches
+
+
+def test_the_search_step_says_plainly_that_a_sourced_answer_can_still_be_wrong() -> None:
+    lesson = next(item for item in LESSONS if item.key == "C5")
+    assert "can still be wrong" in lesson.teaches
+
+
+def test_the_piping_demo_file_is_small_enough_to_survive_the_context_guard() -> None:
+    """The 84 KB refusal is real until TASK-016 lands, so this demo must stay well under it."""
+    from ollama_stack.client import estimate_tokens, usable_window
+
+    lesson = next(item for item in LESSONS if item.key == "C7")
+    assert lesson.stdin is not None
+    assert estimate_tokens(lesson.stdin) < usable_window(config.DEFAULTS["num_ctx"]) // 4
+
+
+def test_the_launcher_prefers_the_o_on_path_so_the_run_proves_the_install(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr("ollama_stack.tutorial.shutil.which", lambda name: "/usr/local/bin/o")
+    assert tutorial.launcher() == ["/usr/local/bin/o"]
+
+
+def test_the_launcher_falls_back_to_the_module_when_o_is_not_on_path(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr("ollama_stack.tutorial.shutil.which", lambda name: None)
+    assert tutorial.launcher()[-2:] == ["-m", "ollama_stack"]
+
+
+def test_quitting_part_way_exits_zero_and_is_not_a_failure(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    monkeypatch.setattr(tutorial, "interactive", lambda: True)
+    _answers(monkeypatch, ["q"])
+    assert tutorial.run() == 0
+    assert "picks up from the top" in capsys.readouterr().out
+
+
+def test_every_step_can_be_skipped(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(tutorial, "interactive", lambda: True)
+    ran: list[str] = []
+
+    def record(lesson: Lesson) -> bool:
+        ran.append(lesson.key)
+        return True
+
+    monkeypatch.setattr(tutorial, "execute", record)
+    _answers(monkeypatch, ["s"] * len(LESSONS))
+    assert tutorial.run() == 0
+    assert ran == []
+
+
+def test_a_failing_step_explains_and_continues_rather_than_aborting(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """A tutorial that only works on a perfect machine teaches the wrong thing."""
+    monkeypatch.setattr(tutorial, "interactive", lambda: True)
+    monkeypatch.setattr(tutorial, "execute", lambda lesson: False)
+    _answers(monkeypatch, [""] * len(LESSONS))
+    assert tutorial.run() == 0
+    out = capsys.readouterr().out
+    assert "o config set fast_model" in out
+    assert LESSONS[-1].teaches in out
+
+
+def test_it_changes_no_config(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(tutorial, "interactive", lambda: True)
+    _answers(monkeypatch, [""] * len(LESSONS))
+    tutorial.run()
+    assert not config.config_path().exists()
+
+
+def test_an_unrunnable_command_is_caught_rather_than_raising(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    def boom(*args: object, **kwargs: object) -> None:
+        raise OSError("no such binary")
+
+    monkeypatch.setattr("ollama_stack.tutorial.subprocess.run", boom)
+    lesson = Lesson("CX", "o nope", ["nope"], "nothing")
+    assert tutorial.execute(lesson) is False
+    assert "could not run it" in capsys.readouterr().out
