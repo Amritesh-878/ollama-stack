@@ -71,7 +71,15 @@ def test_missing_ollama_names_the_install_command_and_exits_non_zero(
 ) -> None:
     monkeypatch.setattr(setup, "ollama_binary", lambda: None)
     assert setup.run(FULL) == 1
-    assert "ollama.com/download" in capsys.readouterr().out
+    # Asserting a literal URL made this pass on Windows and fail on Linux, where the hint is
+    # the install script rather than the download page.
+    assert setup.install_hint() in capsys.readouterr().out
+
+
+def test_every_platform_has_an_install_hint_that_names_ollama() -> None:
+    """CI runs Linux and the dev machine is Windows, so a per-platform string needs all three."""
+    for system in ("Windows", "Darwin", "Linux"):
+        assert "ollama" in setup.INSTALL_HINT[system].lower(), system
 
 
 def test_an_unreachable_daemon_is_reported_separately_from_a_missing_install(
