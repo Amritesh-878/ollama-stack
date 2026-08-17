@@ -104,6 +104,7 @@ def answer_with_search(
     sources: list[Result] = []
     notes: list[str] = []
     searches = 0
+    turns = 0
 
     if force:
         found, note = _search(provider, prompt, count)
@@ -120,6 +121,7 @@ def answer_with_search(
     tools: list[dict[str, Any]] | None = [WEB_SEARCH]
 
     while True:
+        turns += 1
         run = client.chat_stream(messages, model, tools=tools)
         for piece in run:
             write(piece)
@@ -148,7 +150,11 @@ def answer_with_search(
                 notes.append(note)
             sources.extend(found)
             messages.append({"role": "tool", "content": as_prompt(found)})
+        # The final turn goes out without the tool, so the model has to answer with what it has.
         if searches >= max_searches:
             notes.append(f"stopped after {searches} searches")
-            # The final turn goes out without the tool, so the model has to answer with what it has.
+            tools = None
+        elif turns > max_searches:
+            # A call with no query never increments searches, so turns must be capped or this loops.
+            notes.append(f"stopped after {turns} turns without a usable query")
             tools = None

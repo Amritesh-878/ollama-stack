@@ -123,6 +123,23 @@ def test_the_loop_stops_after_three_searches_and_answers_without_the_tool() -> N
 
 
 @responses.activate
+def test_calls_that_never_carry_a_query_still_terminate_the_loop() -> None:
+    """These never increment `searches`, so capping searches alone left the loop unbounded."""
+    empty = _chunks(
+        {"message": {"tool_calls": [{"function": {"name": "web_search", "arguments": {}}}]}},
+        {"message": {"content": ""}, "done": True, "prompt_eval_count": 20, "eval_count": 1},
+    )
+    for _ in range(4):
+        responses.add(responses.POST, CHAT, body=empty)
+    responses.add(responses.POST, CHAT, body=_text_turn("gave up"))
+    outcome, written = _run(FakeProvider())
+    assert outcome.searches == 0
+    assert "".join(written) == "gave up"
+    assert any("without a usable query" in note for note in outcome.notes)
+    assert "tools" not in _sent(len(responses.calls) - 1)
+
+
+@responses.activate
 def test_a_provider_failure_degrades_to_answering_without_search() -> None:
     responses.add(responses.POST, CHAT, body=_tool_turn())
     responses.add(responses.POST, CHAT, body=_text_turn("best effort"))
