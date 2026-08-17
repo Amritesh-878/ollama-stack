@@ -11,7 +11,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from ollama_stack import config
-from ollama_stack.client import OllamaClient, OllamaError, usable_window
+from ollama_stack.client import OllamaClient, OllamaError, prompt_budget
 from ollama_stack.hardware import Gpu, Model, Tier, detect, shortfall_mib, tier_for
 
 PULL_TIMEOUT = 3600
@@ -336,7 +336,7 @@ def closing(report: Report, settings_num_ctx: int) -> None:
     if report.failures:
         say(f"{len(report.failures)} step(s) did not complete. Everything else is ready.")
         say()
-    say(f"Attached files and pipes are refused past {usable_window(settings_num_ctx)} tokens.")
+    say(f"Attached files and pipes are refused past {prompt_budget(settings_num_ctx)} tokens.")
     say("  Raise it for one command with --num-ctx, or for good with `o config set num_ctx`.")
     say()
     if report.path_changed:

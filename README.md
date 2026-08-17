@@ -187,6 +187,20 @@ So this tool always sends `num_ctx`, always checks how much of your prompt was a
 and stops rather than hand you an answer built on half a question. If it refuses, send less or
 raise `--num-ctx`.
 
+**There are two separate checks, and they measure different things.** Before sending, your prompt
+has to leave room for the answer — at the default `num_ctx` of 32768 that means about 24576 tokens
+of prompt, with 8192 held back to generate into. After the reply, the token counts are compared
+against what was sent: if far less was read than sent, the front was dropped and the answer is not
+trustworthy.
+
+**Going over `num_ctx` is not a gentle trim.** Measured on this project: a prompt that exceeds the
+window comes back cut to just over *half* of it, losing 63% from the front, silently. That is why
+the refusal happens before sending rather than after.
+
+**The size estimate is characters over four, and real text varies a lot** — prose measured 5.5
+characters per token here and source code measured 3.0. So `--stats` shows the estimate next to
+the real count, and the real count is the one that matters.
+
 ---
 
 ## Using it from Python

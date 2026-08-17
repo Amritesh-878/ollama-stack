@@ -159,11 +159,11 @@ def _advice(values: dict[str, Any]) -> list[str]:
     num_ctx = int(values["num_ctx"])
     if num_ctx < LOW_NUM_CTX:
         # Derived, not restated: the threshold moves in client.py and this text follows it.
-        from ollama_stack.client import usable_window
+        from ollama_stack.client import prompt_budget
 
         notes.append(
             f"num_ctx is {num_ctx}. Ollama truncates from the FRONT without warning, and the "
-            f"client refuses any prompt reaching {usable_window(num_ctx)} tokens, so attached "
+            f"client refuses any prompt reaching {prompt_budget(num_ctx)} tokens, so attached "
             "files and search results will be cut or refused. 32768 is a measured floor, not a "
             "preference."
         )

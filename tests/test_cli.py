@@ -159,7 +159,7 @@ def test_stdout_carries_only_the_answer_and_the_stats_line_goes_to_stderr(
     main(["--no-web", "the", "answer"])
     captured = capsys.readouterr()
     assert captured.out == "42\n"
-    assert "prompt 10/16384 tok" in captured.err
+    assert "prompt 10 tok read" in captured.err
 
 
 @responses.activate
@@ -298,8 +298,8 @@ def test_a_preflight_refusal_sends_no_request_at_all(
 def test_a_post_hoc_trip_warns_and_exits_non_zero_after_the_text_was_printed(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    responses.add(responses.POST, GENERATE, body=_stream_body("bad", prompt_eval_count=9000))
-    assert main(["--no-web", "--num-ctx", "4096", "hello"]) == 2
+    responses.add(responses.POST, GENERATE, body=_stream_body("bad", prompt_eval_count=16386))
+    assert main(["--no-web", "--num-ctx", "32768", "x" * 80_000]) == 2
     captured = capsys.readouterr()
     assert captured.out == "bad\n"
     assert "do not trust this response" in captured.err
@@ -333,7 +333,7 @@ def test_dry_run_reports_the_plan_and_sends_nothing(
     out = capsys.readouterr().out
     assert len(responses.calls) == 0
     assert "coder -> qwen3-coder:30b" in out
-    assert "window    16384" in out
+    assert "window    24576" in out
 
 
 @responses.activate

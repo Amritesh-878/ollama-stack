@@ -54,11 +54,11 @@ def test_the_search_step_says_plainly_that_a_sourced_answer_can_still_be_wrong()
 
 def test_the_piping_demo_file_is_small_enough_to_survive_the_context_guard() -> None:
     """The 84 KB refusal is real until TASK-016 lands, so this demo must stay well under it."""
-    from ollama_stack.client import estimate_tokens, usable_window
+    from ollama_stack.client import estimate_tokens, prompt_budget
 
     lesson = next(item for item in LESSONS if item.key == "C7")
     assert lesson.stdin is not None
-    assert estimate_tokens(lesson.stdin) < usable_window(config.DEFAULTS["num_ctx"]) // 4
+    assert estimate_tokens(lesson.stdin) < prompt_budget(config.DEFAULTS["num_ctx"]) // 4
 
 
 def test_the_launcher_prefers_the_o_on_path_so_the_run_proves_the_install(

@@ -27,12 +27,21 @@ class OllamaError(RuntimeError):
 
 
 class ContextTruncationError(OllamaError):
-    """The prompt reached the usable window, so the front of it was silently dropped."""
+    """The prompt would leave no room to answer into, or overflowed and lost its front."""
 
 
-def usable_window(num_ctx: int) -> int:
-    """Roughly half of num_ctx, because generation needs room in the same budget."""
-    return num_ctx // 2
+# Room left for the answer: the largest generation measured on this project is 12827 tokens, from
+# an audit with thinking on, and 8192 covers an ordinary long reply without refusing valid prompts.
+GENERATION_RESERVE = 8192
+# Below this share of what we sent, the prompt was cut rather than merely mis-estimated.
+TRUNCATION_RATIO = 0.6
+# How far past num_ctx//2 the clamped count may land; measured at exactly +2 on both models.
+CLAMP_SLACK = 8
+
+
+def prompt_budget(num_ctx: int) -> int:
+    """What the prompt may use: num_ctx minus room to generate into, never below half."""
+    return max(num_ctx - GENERATION_RESERVE, num_ctx // 2)
 
 
 def estimate_tokens(text: str) -> int:
@@ -62,10 +71,11 @@ class Reply:
     prompt_eval_count: int
     eval_count: int
     tool_calls: list[dict[str, Any]]
+    sent_estimate: int = 0
 
     @property
-    def usable_window(self) -> int:
-        return usable_window(self.num_ctx)
+    def prompt_budget(self) -> int:
+        return prompt_budget(self.num_ctx)
 
     @property
     def counts_missing(self) -> bool:
@@ -73,9 +83,25 @@ class Reply:
         return self.prompt_eval_count < 0
 
     @property
+    def read_far_less_than_sent(self) -> bool:
+        """Estimates run 0.72x to 1.32x of the real count, so only a gap outside that band tells."""
+        return self.prompt_eval_count < self.sent_estimate * TRUNCATION_RATIO
+
+    @property
+    def clamped_to_half(self) -> bool:
+        """Measured on both 27Bs: an overflowing prompt comes back at exactly num_ctx//2 + 2."""
+        target = self.num_ctx // 2
+        return target <= self.prompt_eval_count <= target + CLAMP_SLACK
+
+    @property
     def suspect_truncation(self) -> bool:
-        """True once the prompt reached the window, and true when the count is missing entirely."""
-        return self.counts_missing or self.prompt_eval_count >= self.usable_window
+        """Only real evidence of a cut: a send-time budget says nothing about what came back."""
+        if self.counts_missing:
+            return True
+        # Ollama clamps to num_ctx//2, so a smaller send cannot have been cut at all.
+        if self.sent_estimate < self.num_ctx // 2:
+            return False
+        return self.read_far_less_than_sent or self.clamped_to_half
 
 
 class OllamaClient:
@@ -96,10 +122,11 @@ class OllamaClient:
         self.timeout = timeout
         self.strict = strict
         self.think = think
+        self._sent_estimate = 0
 
     @property
-    def usable_window(self) -> int:
-        return usable_window(self.num_ctx)
+    def prompt_budget(self) -> int:
+        return prompt_budget(self.num_ctx)
 
     def _request(
         self,
@@ -174,13 +201,16 @@ class OllamaClient:
 
     def preflight(self, text: str) -> None:
         """Refuses before sending, because a post-hoc check arrives after the answer is read."""
+        estimate = estimate_tokens(text)
+        # Kept even when not strict: it is what the reply's truncation check compares against.
+        self._sent_estimate = estimate
         if not self.strict:
             return
-        estimate = estimate_tokens(text)
-        if estimate >= self.usable_window:
+        if estimate >= self.prompt_budget:
             raise ContextTruncationError(
-                f"the prompt is estimated at {estimate} tokens, which reaches the usable window "
-                f"({self.usable_window} of num_ctx={self.num_ctx}). Nothing was sent. Raise "
+                f"the prompt is estimated at {estimate} tokens, which reaches the prompt budget "
+                f"({self.prompt_budget} of num_ctx={self.num_ctx}, leaving {GENERATION_RESERVE} "
+                f"to answer into). Nothing was sent. Raise "
                 "--num-ctx or send less. The estimate is characters over four and is not exact."
             )
 
@@ -200,6 +230,7 @@ class OllamaClient:
             prompt_eval_count=int(raw) if raw is not None else -1,
             eval_count=int(body.get("eval_count", 0)),
             tool_calls=calls,
+            sent_estimate=self._sent_estimate,
         )
 
     def _guard(self, reply: Reply) -> None:
@@ -212,10 +243,11 @@ class OllamaClient:
             )
         if reply.suspect_truncation:
             raise ContextTruncationError(
-                f"prompt_eval_count={reply.prompt_eval_count} reached the usable window "
-                f"({reply.usable_window} of num_ctx={reply.num_ctx}). Ollama drops the FRONT of "
-                "the prompt and the model answers confidently from what survived. Raise num_ctx "
-                "or send less; do not trust this response."
+                f"prompt_eval_count={reply.prompt_eval_count} against a budget of "
+                f"{reply.prompt_budget} and about {reply.sent_estimate} tokens sent, at "
+                f"num_ctx={reply.num_ctx}. Ollama drops the FRONT of an oversized prompt and the "
+                "model answers confidently from what survived. Raise num_ctx or send less; do "
+                "not trust this response."
             )
 
     def _checked_reply(

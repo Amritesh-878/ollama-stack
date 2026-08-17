@@ -154,7 +154,7 @@ def _dry_run(opts: Options, prompt: str, context: str, settings: Settings) -> in
     spec = resolve(opts.model)
     print(f"model     {opts.model} -> {spec.tag}")
     print(f"num_ctx   {num_ctx} (from {_where(opts, settings)})")
-    print(f"window    {client.usable_window} (refused at or above)")
+    print(f"window    {client.prompt_budget} (refused at or above)")
     print(f"estimate  {estimate_tokens(full)} prompt tokens")
     print(f"stream    {'on' if _stream(opts, settings) else 'off'}")
     print(f"think     {'on' if opts.think else 'off'}")
@@ -189,12 +189,13 @@ def _status_line(
 ) -> None:
     parts = [
         reply.model,
-        f"prompt {reply.prompt_eval_count}/{reply.usable_window} tok",
+        f"prompt {reply.prompt_eval_count} tok read",
         f"generated {reply.eval_count}",
     ]
     if opts.stats:
         rate = reply.eval_count / seconds if seconds > 0 else 0.0
-        parts[1] += f", estimated {estimate}"
+        # The honest comparison is what was sent against what was read, not against a threshold.
+        parts[1] += f", ~{estimate} estimated"
         parts[2] += f" in {seconds:.2f}s wall, {rate:.1f} tok/s"
         # Wall time here starts at the request, so it excludes the ~80ms of process start.
         parts.extend(timings)

@@ -12,8 +12,9 @@ from ollama_stack.client import (
     ContextTruncationError,
     OllamaClient,
     OllamaError,
+    Reply,
     estimate_tokens,
-    usable_window,
+    prompt_budget,
 )
 
 GENERATE = "http://127.0.0.1:11434/api/generate"
@@ -53,10 +54,11 @@ def test_alias_resolves_to_the_real_tag() -> None:
 
 
 @responses.activate
-def test_a_prompt_reaching_the_usable_window_is_refused() -> None:
-    responses.add(responses.POST, GENERATE, json=_body(prompt_eval_count=2050), status=200)
+def test_a_prompt_clamped_to_half_the_window_is_refused() -> None:
+    """Measured on both 27Bs: an overflowing prompt comes back at exactly num_ctx//2 + 2."""
+    responses.add(responses.POST, GENERATE, json=_body(prompt_eval_count=16386), status=200)
     with pytest.raises(ContextTruncationError, match="drops the FRONT"):
-        OllamaClient(num_ctx=4096).generate("p", "qwen")
+        OllamaClient(num_ctx=32768).generate("x" * 80_000, "qwen")
 
 
 @responses.activate
@@ -67,16 +69,16 @@ def test_a_prompt_under_the_window_passes() -> None:
 
 
 @responses.activate
-def test_landing_exactly_on_the_window_is_refused_not_allowed() -> None:
-    responses.add(responses.POST, GENERATE, json=_body(prompt_eval_count=2048), status=200)
+def test_landing_exactly_on_the_clamp_point_is_refused_not_allowed() -> None:
+    responses.add(responses.POST, GENERATE, json=_body(prompt_eval_count=16384), status=200)
     with pytest.raises(ContextTruncationError):
-        OllamaClient(num_ctx=4096).generate("p", "qwen")
+        OllamaClient(num_ctx=32768).generate("x" * 80_000, "qwen")
 
 
 @responses.activate
 def test_non_strict_reports_truncation_instead_of_raising() -> None:
-    responses.add(responses.POST, GENERATE, json=_body(prompt_eval_count=9000), status=200)
-    reply = OllamaClient(num_ctx=4096, strict=False).generate("p", "qwen")
+    responses.add(responses.POST, GENERATE, json=_body(prompt_eval_count=16386), status=200)
+    reply = OllamaClient(num_ctx=32768, strict=False).generate("x" * 80_000, "qwen")
     assert reply.suspect_truncation
 
 
@@ -128,7 +130,7 @@ def test_estimate_rounds_up_so_a_short_prompt_is_never_counted_as_nothing() -> N
 
 
 def test_the_window_rule_has_one_definition_shared_by_the_client_and_the_reply() -> None:
-    assert usable_window(32768) == OllamaClient(num_ctx=32768).usable_window == 16384
+    assert prompt_budget(32768) == OllamaClient(num_ctx=32768).prompt_budget == 24576
 
 
 @responses.activate
@@ -225,10 +227,10 @@ def test_stream_yields_every_token_before_it_raises_on_the_final_counts() -> Non
     """The guard cannot fire earlier - the counts arrive last - so it must not lose the text."""
     body = _ndjson(
         {"response": "a", "done": False},
-        {"response": "b", "done": True, "prompt_eval_count": 9000, "eval_count": 2},
+        {"response": "b", "done": True, "prompt_eval_count": 16386, "eval_count": 2},
     )
     responses.add(responses.POST, GENERATE, body=body, status=200)
-    run = OllamaClient(num_ctx=4096).stream("p", "qwen")
+    run = OllamaClient(num_ctx=32768).stream("x" * 80_000, "qwen")
     seen: list[str] = []
     with pytest.raises(ContextTruncationError, match="drops the FRONT"):
         for chunk in run:
@@ -354,3 +356,53 @@ def test_an_http_error_with_no_usable_body_falls_back_to_the_status() -> None:
     responses.add(responses.POST, GENERATE, body="<html>gateway</html>", status=502)
     with pytest.raises(OllamaError, match="failed against"):
         OllamaClient().generate("hi", "fast")
+
+
+def test_a_prompt_that_used_to_be_refused_is_now_accepted() -> None:
+    """X6: measured, 29514 tokens process in full at 32768; refusing at 16384 cost capability."""
+    client = OllamaClient(num_ctx=32768)
+    client.preflight("x" * 80_000)
+
+
+def test_the_budget_leaves_room_to_generate_into() -> None:
+    from ollama_stack.client import GENERATION_RESERVE
+
+    assert prompt_budget(32768) == 32768 - GENERATION_RESERVE
+
+
+def test_a_small_window_never_yields_a_zero_or_negative_budget() -> None:
+    """A fixed reserve subtracted from a small num_ctx would otherwise refuse everything."""
+    for num_ctx in (1024, 2048, 4096, 8192, 16384):
+        assert 0 < prompt_budget(num_ctx) <= num_ctx
+
+
+def test_the_preflight_and_the_post_hoc_check_share_one_threshold() -> None:
+    """Two thresholds that drift apart accept a prompt and then reject its own reply."""
+    from ollama_stack.client import Reply
+
+    client = OllamaClient(num_ctx=32768)
+    reply = Reply("", "m", 32768, 1000, 0, [], sent_estimate=45000)
+    assert reply.suspect_truncation
+    assert client.prompt_budget == reply.prompt_budget
+
+
+def test_overflow_is_detectable_from_the_counts_whatever_the_threshold_is() -> None:
+    """Measured: a payload over num_ctx comes back at num_ctx//2+2, front gone."""
+    from ollama_stack.client import Reply
+
+    sent_estimate = 45000
+    reply = Reply("", "m", 32768, 16386, 0, [], sent_estimate=45000)
+    assert reply.prompt_eval_count < sent_estimate // 2
+    assert reply.suspect_truncation
+
+
+def test_reading_more_than_estimated_is_not_truncation() -> None:
+    """Measured live: 84 KB of code estimated 21516 and read 29367, and nothing was cut."""
+    reply = Reply("", "m", 32768, 29367, 40, [], sent_estimate=21516)
+    assert not reply.suspect_truncation
+
+
+def test_the_send_budget_protects_against_overflow_at_the_worst_measured_ratio() -> None:
+    """chars/4 under-counts code by 24% (3.03 chars/token measured), and the budget absorbs it."""
+    worst_case_actual = prompt_budget(32768) * (4 / 3.03)
+    assert worst_case_actual < 32768

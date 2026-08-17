@@ -209,10 +209,10 @@ def test_the_closing_line_derives_the_window_rather_than_hard_coding_it(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     """TASK-016 moves this number, and it must move in one place."""
-    from ollama_stack.client import usable_window
+    from ollama_stack.client import prompt_budget
 
     setup.run(FULL)
-    assert str(usable_window(config.load().num_ctx)) in capsys.readouterr().out
+    assert str(prompt_budget(config.load().num_ctx)) in capsys.readouterr().out
 
 
 def test_setup_ends_with_one_instruction_and_it_is_the_tutorial(
