@@ -12,6 +12,7 @@ from ollama_stack.models import DEFAULT_ALIAS
 if TYPE_CHECKING:
     from ollama_stack.client import OllamaClient, Reply, StreamRun
     from ollama_stack.config import Settings
+    from ollama_stack.render import Pretty
     from ollama_stack.tools import SearchOutcome
 
 RESERVED = frozenset(
@@ -276,11 +277,13 @@ def _searching(
     held: list[str] = []
     streaming = _stream(opts, settings)
 
+    pretty = _pretty()
+
     def write(piece: str) -> None:
         if not first:
             first.append(time.perf_counter() - started)
         if streaming:
-            sys.stdout.write(piece)
+            pretty.write(piece)
             sys.stdout.flush()
         else:
             held.append(piece)
@@ -296,16 +299,34 @@ def _searching(
             force=opts.web is True,
         )
     finally:
-        if opts.stream:
+        # `streaming`, not opts.stream: the latter is None until config resolves it.
+        if streaming:
+            pretty.close()
             sys.stdout.write("\n")
             sys.stdout.flush()
-    if not opts.stream:
-        print("".join(held))
-    for note in outcome.notes:
+    if not streaming:
+        _tidy("".join(held))
+    # Two searches that fail the same way are one fact, not two lines of noise.
+    for note in dict.fromkeys(outcome.notes):
         print(f"note: {note}", file=sys.stderr)
     for number, source in enumerate(outcome.sources, 1):
         print(f"[{number}] {source.url}", file=sys.stderr)
     return outcome, (first[0] if first else None)
+
+
+def _pretty() -> Pretty:
+    """Markdown pipes and asterisks are noise in a terminal, so nothing reaches it unrendered."""
+    from ollama_stack.render import Pretty as Renderer
+
+    return Renderer(sys.stdout.write)
+
+
+def _tidy(text: str) -> None:
+    """A whole reply rather than a stream, so this one owns its trailing newline."""
+    pretty = _pretty()
+    pretty.write(text)
+    pretty.close()
+    sys.stdout.write("\n")
 
 
 def run_query(opts: Options, prompt: str, context: str = "") -> int:
@@ -338,19 +359,21 @@ def run_query(opts: Options, prompt: str, context: str = "") -> int:
             estimate, searched = outcome.prompt_estimate, outcome.searches
         elif _stream(opts, settings):
             run = client.stream(prompt, opts.model, context=context)
+            pretty = _pretty()
             try:
                 for chunk in run:
                     if first_word is None:
                         first_word = time.perf_counter() - started
-                    sys.stdout.write(chunk)
+                    pretty.write(chunk)
                     sys.stdout.flush()
             finally:
+                pretty.close()
                 sys.stdout.write("\n")
                 sys.stdout.flush()
             reply = run.reply
         else:
             reply = client.generate(prompt, opts.model, context=context)
-            print(reply.text)
+            _tidy(reply.text)
     except ContextTruncationError as exc:
         print(f"refused: {exc}", file=sys.stderr)
         return 2

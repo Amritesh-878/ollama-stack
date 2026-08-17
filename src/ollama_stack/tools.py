@@ -77,15 +77,24 @@ def _estimate(messages: list[dict[str, Any]]) -> int:
     return estimate_tokens("\n".join(str(m.get("content", "")) for m in messages))
 
 
-def _search(provider: SearchProvider, query: str, count: int) -> tuple[list[Result], str]:
-    """A provider failure degrades to answering without results, never to failing the command."""
+# Given to the model when the search itself failed, so it says so instead of answering from
+# memory as though it had looked. "No results were found" reads as a fact about the web.
+SEARCH_DOWN = (
+    "The web search tool is UNAVAILABLE right now - the search did not run, so nothing was "
+    "looked up. Do not answer from memory as if you had searched. Tell the user plainly that "
+    "you could not look this up, and name what you would have searched for."
+)
+
+
+def _search(provider: SearchProvider, query: str, count: int) -> tuple[list[Result], str, str]:
+    """Returns the hits, a note for the user, and what the model should be told."""
     try:
         found = provider.search(query, count)
     except SearchError as exc:
-        return [], f"search unavailable, answering without it: {exc}"
+        return [], f"could not search: {exc}", SEARCH_DOWN
     if not found:
-        return [], f"no results for {query!r}, answering without them"
-    return found, ""
+        return [], f"no results for {query!r}", as_prompt([])
+    return found, "", as_prompt(found)
 
 
 def answer_with_search(
@@ -107,14 +116,14 @@ def answer_with_search(
     turns = 0
 
     if force:
-        found, note = _search(provider, prompt, count)
+        found, note, told = _search(provider, prompt, count)
         searches += 1
         if note:
             notes.append(note)
         sources.extend(found)
-        if found:
-            # Forced results go in as context, not as a tool message with no call to answer.
-            context = f"{context}\n\nWeb results:\n{as_prompt(found)}".strip()
+        # Told either way: -w that found nothing must not read as a question answered from memory.
+        label = "Web results" if found else "Web search"
+        context = f"{context}\n\n{label}:\n{told}".strip()
 
     body = f"{context}\n\n{prompt}".strip() if context else prompt
     messages: list[dict[str, Any]] = [{"role": "user", "content": body}]
@@ -144,12 +153,12 @@ def answer_with_search(
                 notes.append("the model asked to search without giving a query")
                 messages.append({"role": "tool", "content": "No query was given."})
                 continue
-            found, note = _search(provider, query, count)
+            found, note, told = _search(provider, query, count)
             searches += 1
             if note:
                 notes.append(note)
             sources.extend(found)
-            messages.append({"role": "tool", "content": as_prompt(found)})
+            messages.append({"role": "tool", "content": told})
         # The final turn goes out without the tool, so the model has to answer with what it has.
         if searches >= max_searches:
             notes.append(f"stopped after {searches} searches")

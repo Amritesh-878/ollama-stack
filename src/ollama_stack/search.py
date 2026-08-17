@@ -9,6 +9,10 @@ from html.parser import HTMLParser
 from typing import Protocol
 
 LITE_ENDPOINT = "https://lite.duckduckgo.com/lite/"
+# Same results, different markup. Tried when lite answers with a bot check, which it does often.
+HTML_ENDPOINT = "https://html.duckduckgo.com/html/"
+TITLE_CLASSES = frozenset({"result-link", "result__a"})
+SNIPPET_CLASSES = frozenset({"result-snippet", "result__snippet"})
 # Without a browser agent the lite endpoint answers with an anti-bot page instead of results.
 USER_AGENT = (
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/124.0 Safari/537.36"
@@ -80,21 +84,26 @@ class _LiteParser(HTMLParser):
         self._snippet: list[str] = []
         self._in_link = False
         self._in_snippet = False
+        # Which tag opened each mode: the html endpoint puts snippets in <a>, lite in <td>.
+        self._link_tag = ""
+        self._snippet_tag = ""
 
     def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
         values = {key: (value or "") for key, value in attrs}
-        classes = values.get("class", "").split()
-        if tag == "a" and "result-link" in classes:
+        classes = set(values.get("class", "").split())
+        if classes & TITLE_CLASSES:
             self._flush()
             self._in_link = True
+            self._link_tag = tag
             self._href = values.get("href", "")
-        elif tag == "td" and "result-snippet" in classes:
+        elif classes & SNIPPET_CLASSES:
             self._in_snippet = True
+            self._snippet_tag = tag
 
     def handle_endtag(self, tag: str) -> None:
-        if tag == "a":
+        if self._in_link and tag == self._link_tag:
             self._in_link = False
-        elif tag == "td":
+        if self._in_snippet and tag == self._snippet_tag:
             self._in_snippet = False
 
     def handle_data(self, data: str) -> None:
@@ -139,12 +148,17 @@ class DuckDuckGo:
         self.endpoint = endpoint
         self.timeout = timeout
 
-    def search(self, query: str, count: int = DEFAULT_COUNT) -> list[Result]:
+    def endpoints(self) -> list[str]:
+        """The configured one first, then the other mirror, because either can be rate-limited."""
+        others = [e for e in (LITE_ENDPOINT, HTML_ENDPOINT) if e != self.endpoint]
+        return [self.endpoint, *others]
+
+    def _fetch(self, endpoint: str, query: str) -> list[Result]:
         import requests
 
         try:
             response = requests.post(
-                self.endpoint,
+                endpoint,
                 data={"q": query},
                 headers={"User-Agent": USER_AGENT},
                 timeout=self.timeout,
@@ -155,8 +169,29 @@ class DuckDuckGo:
         page = response.text
         results = parse_lite(page)
         if not results and _looks_blocked(page):
-            raise SearchError(f"{self.name} answered with a bot check instead of results")
-        return trim(results, count)
+            raise SearchError(
+                "duckduckgo is rate-limiting this machine. It has no API key and no quota, so "
+                "this happens after a few searches and clears on its own in a minute or two."
+            )
+        return results
+
+    def search(self, query: str, count: int = DEFAULT_COUNT) -> list[Result]:
+        problems: list[str] = []
+        answered = False
+        for endpoint in self.endpoints():
+            try:
+                results = self._fetch(endpoint, query)
+            except SearchError as exc:
+                problems.append(str(exc))
+                continue
+            answered = True
+            # An empty page from one mirror is worth retrying on the other before giving up.
+            if results:
+                return trim(results, count)
+        if answered:
+            # A mirror answered and had nothing. That is a fact about the query, not a failure.
+            return []
+        raise SearchError(problems[0])
 
 
 def _looks_blocked(page: str) -> bool:

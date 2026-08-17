@@ -6,6 +6,7 @@ import pytest
 import responses
 
 from ollama_stack.search import (
+    HTML_ENDPOINT,
     LITE_ENDPOINT,
     DuckDuckGo,
     Result,
@@ -107,8 +108,18 @@ def test_the_provider_sends_a_browser_agent_because_the_endpoint_requires_one() 
 def test_a_bot_check_is_an_error_not_an_empty_result_set() -> None:
     """Rate limiting arrives as a 200; reading it as "no results" would hide it completely."""
     responses.add(responses.POST, LITE_ENDPOINT, body=BOT_CHECK, status=200)
-    with pytest.raises(SearchError, match="bot check"):
+    responses.add(responses.POST, HTML_ENDPOINT, body=BOT_CHECK, status=200)
+    with pytest.raises(SearchError, match="rate-limiting"):
         DuckDuckGo().search("anything")
+
+
+@responses.activate
+def test_the_other_mirror_is_tried_when_the_first_is_blocked() -> None:
+    """Lite is rate-limited often, and html serves the same results under different markup."""
+    responses.add(responses.POST, LITE_ENDPOINT, body=BOT_CHECK, status=200)
+    responses.add(responses.POST, HTML_ENDPOINT, body=HTML_PAGE, status=200)
+    found = DuckDuckGo().search("python latest version")
+    assert found and found[0].url == "https://www.python.org/downloads/"
 
 
 @responses.activate
@@ -122,3 +133,11 @@ def test_a_transport_failure_is_a_search_error_not_a_leaked_requests_error() -> 
 def test_an_honestly_empty_page_returns_no_results_without_raising() -> None:
     responses.add(responses.POST, LITE_ENDPOINT, body="<html><body></body></html>", status=200)
     assert DuckDuckGo().search("nothing at all") == []
+
+
+HTML_PAGE = """<div class="links_main links_deep result__body">
+  <h2 class="result__title">
+    <a rel="nofollow" class="result__a" href="https://www.python.org/downloads/">Download Python</a>
+  </h2>
+  <a class="result__snippet">The official home of Python.</a>
+</div>"""
