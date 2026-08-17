@@ -40,6 +40,8 @@ cat main.py | o explain this          # pipe a file in as context
 | `-m, --model` | Alias like `heavy` or `coder`, or any Ollama tag like `llama4:8b` |
 | `--num-ctx` | Context window to request. Default 32768. |
 | `--think` | Let the model reason before answering. Off by default. |
+| `-w, --web` | Search the web first, instead of leaving it to the model |
+| `--no-web` | Never search; the model answers from training alone |
 | `--no-stream` | Wait for the whole reply instead of streaming |
 | `--stats` | Wall time, tokens per second, and how long until the first word |
 | `--dry-run` | Show what would be sent, send nothing |
@@ -57,6 +59,29 @@ length before saying anything, and none of that reasoning is printed — so you 
 terminal. On `qwen3.5:4b`, `what is 10+10` takes **0.45s** to show a word with thinking off and
 **1.7s** with it on, because it spends ~170 tokens deciding. Use `--think` when the question
 deserves it. `--stats` shows how many tokens went to thinking.
+
+### Web search
+
+The model gets a search tool and decides for itself whether to use it. Ask about something
+recent and it looks it up, prints the answer, and lists the source URLs on stderr.
+
+```sh
+o who won the F1 race last weekend    # it searches on its own
+o -w what is the latest python        # force a search first
+o --no-web explain this traceback     # never search
+```
+
+Three things to know before you rely on it:
+
+- **It searches when the question sounds current, and misses quiet ones.** "Who won the race last
+  weekend" triggers it; "what is the latest stable Python" often doesn't, and you get a confident
+  answer from training data instead. `-w` is the only reliable way to make it look.
+- **A sourced answer is not a correct answer.** The small model will take a low-quality page over
+  a good one. Asked the same forced-search question, `fast` concluded "Python 3.12" from a content
+  farm while `heavy` got 3.14.7 from the same five results. Check the URLs it prints.
+- **The default provider is DuckDuckGo scraping, with no key and no account, and it rate-limits
+  after roughly six searches.** When that happens you get a note on stderr and an answer without
+  search — never a failed command. It clears after a few minutes idle.
 
 **If your question starts with a command name**, it runs the command — `o status of the economy`
 runs `status`. Use `o ask "status of the economy"` for those.
@@ -112,8 +137,8 @@ small model can spend a second and a half reasoning about `10+10`.
 
 ## Coming
 
-Interactive setup, saved config, web search for questions past the model's cutoff, images,
-follow-up questions, and an MCP server so editors can call local models as tools.
+Interactive setup, saved config, images, follow-up questions, and an MCP server so editors can
+call local models as tools.
 
 ---
 
