@@ -171,7 +171,14 @@ def test_a_num_ctx_at_or_above_the_threshold_does_not_warn() -> None:
 
 def test_a_model_outside_the_registry_warns_rather_than_failing() -> None:
     settings = config.load(flags={"fast_model": "llama9:70b"})
-    assert any("not in the registry" in warning for warning in settings.warnings)
+    assert any("not a model this tool knows about" in warning for warning in settings.warnings)
+
+
+def test_a_model_the_wizard_itself_recommends_never_warns() -> None:
+    """A friend on an 8 GB card got this warning on every single command for the tier pick."""
+    for tag in models.TIER_MODELS:
+        settings = config.load(flags={"fast_model": tag})
+        assert not [w for w in settings.warnings if "knows about" in w], tag
 
 
 def test_a_provider_with_no_implementation_warns() -> None:

@@ -30,6 +30,20 @@ REGISTRY: dict[str, ModelSpec] = {
     "qwen36": ModelSpec("qwen3.6:27b", "previous daily driver, benchmarked against heavy", True),
 }
 
+# Everything `o setup` can recommend, so a machine smaller than this one never gets warned about
+# the model the wizard itself picked for it. Keyed by tag; these are sizes, not roles.
+TIER_MODELS: dict[str, str] = {
+    "qwen3.5:0.8b": "1 GB - CPU-only and very small cards",
+    "qwen3.5:2b": "2.7 GB - fast path on cards under 10 GB",
+    "qwen3.5:9b": "6.6 GB - heavy on 10-16 GB cards",
+    "qwen3.5:27b": "17 GB - heavy on 16-21 GB cards",
+}
+
+
+def known_tag(tag: str) -> bool:
+    """True for anything routable without a warning: a registry entry or a tier recommendation."""
+    return tag in TIER_MODELS or _by_tag(tag) is not None
+
 FAST_ALIAS = "fast"
 HEAVY_ALIAS = "heavy"
 DEFAULT_ALIAS = FAST_ALIAS
@@ -56,6 +70,13 @@ def _by_tag(tag: str) -> ModelSpec | None:
     return None
 
 
+def _described(tag: str) -> str:
+    known = _by_tag(tag)
+    if known is not None:
+        return known.summary
+    return TIER_MODELS.get(tag, "not in the registry")
+
+
 def resolve(name: str) -> ModelSpec:
     """Turn an alias or a raw Ollama tag into a spec, preferring aliases."""
     if name in REGISTRY:
@@ -63,6 +84,10 @@ def resolve(name: str) -> ModelSpec:
         tag = _ROLE_TAGS.get(name, spec.tag)
         if tag == spec.tag:
             return spec
-        # A repointed role is unmeasured until someone measures the tag it now points at.
-        return _by_tag(tag) or ModelSpec(tag, f"{name}, repointed by config", False)
-    return _by_tag(name) or ModelSpec(name, "not in the registry", False)
+        # Describe the role, not whatever other alias happens to share the tag: pointing `heavy`
+        # at the fast model used to make it advertise itself as the hot path.
+        target = _by_tag(tag)
+        # Measurement belongs to the tag, never to the role that happens to point at it.
+        measured = target.measured if target is not None else False
+        return ModelSpec(tag, f"{spec.summary.split(';')[0]} (set by config)", measured)
+    return _by_tag(name) or ModelSpec(name, _described(name), False)

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from ollama_stack import models
 from ollama_stack.models import (
     DEFAULT_ALIAS,
     FAST_ALIAS,
@@ -55,3 +56,21 @@ def test_only_the_heavy_role_is_flagged_measured() -> None:
     """TASK-009 benchmarked heavy for quality; the fast role has latency figures only."""
     assert REGISTRY[HEAVY_ALIAS].measured
     assert not REGISTRY[FAST_ALIAS].measured
+
+
+def test_a_repointed_role_describes_the_role_not_another_alias() -> None:
+    """Pointing heavy at the fast model made `o models` advertise heavy as the hot path."""
+    models.set_role_tag(HEAVY_ALIAS, "qwen3.5:4b")
+    try:
+        spec = models.resolve(HEAVY_ALIAS)
+        assert spec.tag == "qwen3.5:4b"
+        assert "hot path" not in spec.summary
+        assert "audits" in spec.summary
+    finally:
+        models.clear_role_tags()
+
+
+def test_a_tier_recommendation_resolves_with_a_real_description() -> None:
+    spec = models.resolve("qwen3.5:2b")
+    assert spec.tag == "qwen3.5:2b"
+    assert "not in the registry" not in spec.summary

@@ -14,6 +14,7 @@ from ollama_stack.models import (
     FAST_ALIAS,
     HEAVY_ALIAS,
     REGISTRY,
+    known_tag,
     set_role_tag,
 )
 
@@ -167,11 +168,11 @@ def _advice(values: dict[str, Any]) -> list[str]:
             "files and search results will be cut or refused. 32768 is a measured floor, not a "
             "preference."
         )
-    known = {spec.tag for spec in REGISTRY.values()}
     for key in ("fast_model", "heavy_model"):
         tag = str(values[key])
-        if tag not in known:
-            notes.append(f"{key} is {tag!r}, which is not in the registry - see `o models`")
+        # `o setup` recommends by VRAM tier, so its own picks must not warn on every command.
+        if not known_tag(tag):
+            notes.append(f"{key} is {tag!r}, which is not a model this tool knows about")
     provider = str(values["search_provider"])
     if provider not in PROVIDERS:
         notes.append(f"search_provider {provider!r} has no implementation; duckduckgo will be used")
