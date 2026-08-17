@@ -24,8 +24,8 @@ app = typer.Typer(
     help="Local Ollama models, one command.",
     epilog=(
         "Ask a bare question with no command and no quotes: `o what is 10+10`. Bare questions "
-        "take -m/--model, --num-ctx, --no-stream, --stats, --think/--no-think, --dry-run and "
-        "--version; every "
+        "take -m/--model, --num-ctx, --no-stream, --stats, --think/--no-think, -w/--no-web, "
+        "--dry-run and --version; every "
         "other word is the question. A question whose FIRST word is one of the commands above "
         "runs that command instead, so `o status of the economy` reports what is loaded - ask "
         'it as a question with `o ask "status of the economy"`. setup, config and implement '
@@ -42,9 +42,17 @@ def ask(
     no_stream: bool = typer.Option(False, "--no-stream", help="Wait for the whole reply."),
     stats: bool = typer.Option(False, "--stats", help="Add wall time and the token estimate."),
     think: bool = typer.Option(False, "--think/--no-think", help="Reason before answering."),
+    web: bool = typer.Option(True, "--web/--no-web", "-w", help="Allow a web search."),
 ) -> None:
     """Send a prompt to a model. The escape for a question starting with a command name."""
-    opts = Options(model=model, num_ctx=num_ctx, stream=not no_stream, stats=stats, think=think)
+    opts = Options(
+        model=model,
+        num_ctx=num_ctx,
+        stream=not no_stream,
+        stats=stats,
+        think=think,
+        web=None if web else False,
+    )
     raise typer.Exit(run_query(opts, prompt, piped_context()))
 
 
@@ -64,7 +72,10 @@ def audit(
         "Review the file below for defects. Report each as file:line with the concrete failure. "
         "Do not summarize what the code does. If you find nothing, say so plainly."
     )
-    opts = Options(model=model, num_ctx=num_ctx, stream=not no_stream, stats=stats, think=think)
+    # Screening reads one file, so a search tool would only invite the model to wander off it.
+    opts = Options(
+        model=model, num_ctx=num_ctx, stream=not no_stream, stats=stats, think=think, web=False
+    )
     raise typer.Exit(run_query(opts, prompt, f"--- {file.name} ---\n{body}"))
 
 

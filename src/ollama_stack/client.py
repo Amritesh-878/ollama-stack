@@ -264,6 +264,22 @@ class OllamaClient:
         calls: list[dict[str, Any]] = message.get("tool_calls") or []
         return self._checked_reply(body, spec.tag, str(message.get("content", "")), calls)
 
+    def chat_stream(
+        self,
+        messages: list[dict[str, Any]],
+        model: str,
+        tools: list[dict[str, Any]] | None = None,
+    ) -> StreamRun:
+        """Streamed multi-turn, so a tool loop keeps the token-by-token output of the bare path."""
+        spec = resolve(model)
+        self.preflight("\n".join(str(m.get("content", "")) for m in messages))
+        payload: dict[str, Any] = {"model": spec.tag, "messages": messages}
+        if tools:
+            payload["tools"] = tools
+        started = time.perf_counter()
+        response = self._request("/api/chat", payload, stream=True)
+        return StreamRun(self, response, spec.tag, started)
+
 
 class StreamRun:
     """One streamed reply: text arrives first and the counts last, so the guard fires last too."""
@@ -283,6 +299,7 @@ class StreamRun:
         self.first_chunk_seconds: float | None = None
         # A reasoning model emits these before a single visible word, which looks like a stall.
         self.thinking_tokens = 0
+        self.tool_calls: list[dict[str, Any]] = []
 
     @property
     def reply(self) -> Reply:
@@ -305,14 +322,22 @@ class StreamRun:
                     raise OllamaError(f"ollama failed mid-stream: {chunk['error']}")
                 if self.first_chunk_seconds is None:
                     self.first_chunk_seconds = time.perf_counter() - self._started
-                if chunk.get("thinking"):
+                # /api/generate puts the token at the top level, /api/chat nests it in a message.
+                raw = chunk.get("message")
+                message: dict[str, Any] = raw if isinstance(raw, dict) else {}
+                if chunk.get("thinking") or message.get("thinking"):
                     self.thinking_tokens += 1
-                piece = str(chunk.get("response", ""))
+                calls = message.get("tool_calls")
+                if isinstance(calls, list):
+                    self.tool_calls.extend(call for call in calls if isinstance(call, dict))
+                piece = str(chunk.get("response", "") or message.get("content", ""))
                 if piece:
                     text.append(piece)
                     yield piece
                 if chunk.get("done"):
-                    self._final = self._client._build(chunk, self._model, "".join(text), [])
+                    self._final = self._client._build(
+                        chunk, self._model, "".join(text), self.tool_calls
+                    )
         except requests.RequestException as exc:
             raise OllamaError(f"the stream broke against {self._client.host}: {exc}") from exc
         except json.JSONDecodeError as exc:

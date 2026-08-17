@@ -10,7 +10,8 @@ from typing import TYPE_CHECKING
 from ollama_stack.models import DEFAULT_ALIAS, DEFAULT_NUM_CTX
 
 if TYPE_CHECKING:
-    from ollama_stack.client import Reply, StreamRun
+    from ollama_stack.client import OllamaClient, Reply, StreamRun
+    from ollama_stack.tools import SearchOutcome
 
 RESERVED = frozenset(
     {
@@ -28,6 +29,8 @@ RESERVED = frozenset(
 )
 
 HELP_FLAGS = frozenset({"-h", "--help"})
+
+_WEB_LABELS = {None: "automatic, the model decides", True: "forced", False: "off"}
 
 USAGE = """usage: o <question>          ask the default model, no quotes needed
        o ask "<question>"    when the question starts with a subcommand name
@@ -49,6 +52,8 @@ class Options:
     dry_run: bool = False
     version: bool = False
     think: bool = False
+    # None is automatic: the model gets the tool and decides. True forces, False withholds it.
+    web: bool | None = None
 
 
 def _value(argv: list[str], index: int, token: str) -> str:
@@ -78,6 +83,16 @@ def _parse(argv: list[str]) -> tuple[Options, list[str]]:
             index += 1
         elif token == "--stats":
             opts.stats = True
+            index += 1
+        elif token in ("-w", "--web"):
+            if opts.web is False:
+                raise UsageError("-w and --no-web contradict each other; pick one")
+            opts.web = True
+            index += 1
+        elif token == "--no-web":
+            if opts.web is True:
+                raise UsageError("-w and --no-web contradict each other; pick one")
+            opts.web = False
             index += 1
         elif token == "--think":
             opts.think = True
@@ -139,6 +154,7 @@ def _dry_run(opts: Options, prompt: str, context: str) -> int:
     print(f"estimate  {estimate_tokens(full)} prompt tokens")
     print(f"stream    {'on' if opts.stream else 'off'}")
     print(f"think     {'on' if opts.think else 'off'}")
+    print(f"web       {_WEB_LABELS[opts.web]}")
     try:
         client.preflight(full)
     except ContextTruncationError as exc:
@@ -181,6 +197,52 @@ def _status_line(
     print(f"[{' | '.join(parts)}]", file=sys.stderr)
 
 
+def _searching(
+    client: OllamaClient,
+    opts: Options,
+    prompt: str,
+    context: str,
+    started: float,
+) -> tuple[SearchOutcome, float | None]:
+    """The tool loop, taken whenever search is not explicitly forbidden."""
+    from ollama_stack.search import DuckDuckGo
+    from ollama_stack.tools import answer_with_search
+
+    first: list[float] = []
+    held: list[str] = []
+
+    def write(piece: str) -> None:
+        if not first:
+            first.append(time.perf_counter() - started)
+        if opts.stream:
+            sys.stdout.write(piece)
+            sys.stdout.flush()
+        else:
+            held.append(piece)
+
+    try:
+        outcome = answer_with_search(
+            client,
+            prompt,
+            opts.model,
+            DuckDuckGo(),
+            write,
+            context=context,
+            force=opts.web is True,
+        )
+    finally:
+        if opts.stream:
+            sys.stdout.write("\n")
+            sys.stdout.flush()
+    if not opts.stream:
+        print("".join(held))
+    for note in outcome.notes:
+        print(f"note: {note}", file=sys.stderr)
+    for number, source in enumerate(outcome.sources, 1):
+        print(f"[{number}] {source.url}", file=sys.stderr)
+    return outcome, (first[0] if first else None)
+
+
 def run_query(opts: Options, prompt: str, context: str = "") -> int:
     """One implementation for the bare path and for `o ask`, so they cannot behave differently."""
     from ollama_stack.client import (
@@ -196,8 +258,15 @@ def run_query(opts: Options, prompt: str, context: str = "") -> int:
     started = time.perf_counter()
     first_word: float | None = None
     run: StreamRun | None = None
+    searched = 0
+    estimate = estimate_tokens(f"{context}\n\n{prompt}".strip() if context else prompt)
     try:
-        if opts.stream:
+        if opts.web is not False:
+            outcome, first_word = _searching(client, opts, prompt, context, started)
+            reply, run = outcome.reply, outcome.last_run
+            # The conversation grew by whatever search returned, so the original estimate is stale.
+            estimate, searched = outcome.prompt_estimate, outcome.searches
+        elif opts.stream:
             run = client.stream(prompt, opts.model, context=context)
             try:
                 for chunk in run:
@@ -218,8 +287,10 @@ def run_query(opts: Options, prompt: str, context: str = "") -> int:
     except OllamaError as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 1
-    estimate = estimate_tokens(f"{context}\n\n{prompt}".strip() if context else prompt)
-    _status_line(opts, reply, estimate, time.perf_counter() - started, _timings(run, first_word))
+    timings = _timings(run, first_word)
+    if searched:
+        timings.append(f"searched {searched}x")
+    _status_line(opts, reply, estimate, time.perf_counter() - started, timings)
     return 0
 
 
