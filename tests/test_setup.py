@@ -307,3 +307,34 @@ def test_a_tok_per_second_figure_is_withheld_when_the_reply_is_too_short(
     real_verify(FakeClient(200), "m", long)  # type: ignore[arg-type]
     assert "tok/s" not in short.steps[0].detail
     assert "tok/s" in long.steps[0].detail
+
+
+def test_declining_the_path_install_is_told_a_command_that_works(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """`o` lives only in the venv when the install is declined, so `o tutorial` would not run."""
+    report = setup.Report()
+    report.o_on_path = False
+    setup.closing(report, 32768)
+    assert "uv run o tutorial" in capsys.readouterr().out
+
+
+def test_a_path_changing_install_asks_for_a_new_terminal(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    report = setup.Report()
+    report.path_changed = True
+    setup.closing(report, 32768)
+    assert "Open a new terminal" in capsys.readouterr().out
+
+
+def test_bootstrap_help_prints_usage_and_installs_nothing(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Asking what a script does must not build a 17 MB environment as a side effect."""
+    import bootstrap
+
+    assert bootstrap.main(["--help"]) == 0
+    out = capsys.readouterr().out
+    assert "usage: python bootstrap.py" in out
+    assert "Environment ready" not in out

@@ -63,6 +63,8 @@ class Report:
 
     steps: list[Step] = field(default_factory=list)
     path_changed: bool = False
+    # False when the global install was declined or failed, so `o` exists only inside the venv.
+    o_on_path: bool = True
 
     def add(self, name: str, ok: bool, detail: str = "") -> None:
         self.steps.append(Step(name, ok, detail))
@@ -297,6 +299,7 @@ def global_install(report: Report) -> None:
     uv = shutil.which("uv")
     root = repo_root()
     if uv is None or root is None:
+        report.o_on_path = False
         report.add("global install", False, "needs uv and a working tree; `uv run o` still works")
         return
     before = resolve_on_path()
@@ -309,9 +312,11 @@ def global_install(report: Report) -> None:
             check=False,
         )
     except OSError as exc:
+        report.o_on_path = False
         report.add("global install", False, str(exc))
         return
     if done.returncode != 0:
+        report.o_on_path = False
         report.add("global install", False, (done.stderr or done.stdout).strip())
         return
     found = resolve_on_path()
@@ -339,7 +344,10 @@ def closing(report: Report, settings_num_ctx: int) -> None:
     say(f"Attached files and pipes are refused past {prompt_budget(settings_num_ctx)} tokens.")
     say("  Raise it for one command with --num-ctx, or for good with `o config set num_ctx`.")
     say()
-    if report.path_changed:
+    if not report.o_on_path:
+        # Telling someone who declined the PATH install to type `o` gives them a broken command.
+        say("Setup done. From this folder, type:  uv run o tutorial")
+    elif report.path_changed:
         say("Setup done. Open a new terminal and type:  o tutorial")
     else:
         say("Setup done. Type:  o tutorial")
@@ -407,6 +415,7 @@ def run(answers: Answers) -> int:
     if install:
         global_install(report)
     elif install is False:
+        report.o_on_path = False
         report.add("global install", True, "declined; `uv run o` works from the repo")
 
     closing(report, settings.num_ctx)

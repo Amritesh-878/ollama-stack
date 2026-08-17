@@ -164,9 +164,29 @@ def hand_off(uv: str | None, passthrough: list[str]) -> int:
         return 1
 
 
+USAGE = """usage: python bootstrap.py [OPTIONS]   (on Windows: py bootstrap.py)
+
+Sets up ollama-stack: installs uv if you allow it, builds the environment, then
+runs the setup wizard. Uses only the standard library, so it works before
+anything is installed.
+
+  --help          show this and do nothing else
+
+Anything else is passed to the wizard, which has its own flags:
+
+  --fast-model TAG      --heavy-model TAG     --search-provider NAME
+  --install / --no-install                    --no-pull
+
+Run `o setup --help` once installed for the wizard's own help."""
+
+
 def main(argv: list[str] | None = None) -> int:
     _utf8()
     passthrough = list(sys.argv[1:] if argv is None else argv)
+    # Asking what a script does must not install anything, so this returns before any side effect.
+    if "--help" in passthrough or "-h" in passthrough:
+        print(USAGE)
+        return 0
     say("ollama-stack setup")
     say("=" * 18)
     stub = store_stub_warning()
