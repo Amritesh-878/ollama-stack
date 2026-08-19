@@ -64,7 +64,8 @@ def audit(
     body = file.read_text(encoding="utf-8", errors="replace")
     prompt = (
         "Review the file below for defects. Report each as file:line with the concrete failure. "
-        "Do not summarize what the code does. If you find nothing, say so plainly."
+        "Do not summarize what the file does. If you find nothing, say so and list what you "
+        "checked, so a reader can tell an examined file from an unexamined one."
     )
     # Screening reads one file, so a search tool would only invite the model to wander off it.
     opts = Options(

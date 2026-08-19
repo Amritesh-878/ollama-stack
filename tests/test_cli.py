@@ -492,3 +492,14 @@ def test_the_bare_path_imports_nothing_outside_its_allowlist() -> None:
     )
     extra = (bare - baseline) - allowed
     assert not extra, f"the bare path now imports {sorted(extra)}"
+
+
+def test_the_audit_prompt_asks_what_was_checked_when_nothing_is_found() -> None:
+    """`o audit` says its silence carries no information, so silence must be itemised."""
+    import inspect
+
+    from ollama_stack import cli
+
+    source = inspect.getsource(cli.audit)
+    assert "list what you" in source
+    assert "unexamined" in source
