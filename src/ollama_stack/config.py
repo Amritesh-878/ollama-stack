@@ -24,7 +24,7 @@ APP_DIR = "ollama-stack"
 FILE_NAME = "config.toml"
 LOW_NUM_CTX = 8192
 SECRET_KEYS = frozenset({"search_api_key"})
-PROVIDERS = frozenset({"duckduckgo"})
+PROVIDERS = frozenset({"duckduckgo", "wikipedia"})
 
 # Highest first. Stated here, in `o config`, and in the README, because an undocumented
 # precedence order produces bug reports that are not bugs.

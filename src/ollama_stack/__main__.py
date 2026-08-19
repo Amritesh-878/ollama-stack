@@ -270,7 +270,7 @@ def _searching(
     settings: Settings,
 ) -> tuple[SearchOutcome, float | None]:
     """The tool loop, taken whenever search is not explicitly forbidden."""
-    from ollama_stack.search import DuckDuckGo
+    from ollama_stack.search import default_provider
     from ollama_stack.tools import answer_with_search
 
     first: list[float] = []
@@ -293,7 +293,7 @@ def _searching(
             client,
             prompt,
             opts.model,
-            DuckDuckGo(),
+            default_provider(),
             write,
             context=context,
             force=opts.web is True,

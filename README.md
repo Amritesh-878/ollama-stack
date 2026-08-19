@@ -117,8 +117,10 @@ Three things to know before you rely on it:
   good one. Asked the same forced-search question, `fast` concluded "Python 3.12" from a content
   farm while `heavy` returned 3.14.7 from the same five results. Check the URLs it prints.
 - **The default provider scrapes DuckDuckGo with no key and no account, and it rate-limits after
-  roughly six searches.** When that happens you get a note on stderr and an answer without search,
-  never a failed command. It clears after a few minutes idle.
+  roughly six searches.** Two DuckDuckGo mirrors are tried, then Wikipedia, which needs no key and
+  does not rate-limit. Wikipedia answers "what is X" and "who is X" well and is no use for this
+  week's news. If every provider fails you get a note on stderr and the model is told the search
+  did not run, so it says so rather than answering from training data.
 
 **If your question starts with a command name**, it runs the command. `o status of the economy`
 runs `status`. Use `o ask "status of the economy"` for those.

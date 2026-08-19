@@ -197,3 +197,84 @@ class DuckDuckGo:
 def _looks_blocked(page: str) -> bool:
     """Rate limiting arrives as a normal 200, so the body is the only thing that says so."""
     return bool(re.search(r"anomaly|captcha|unusual traffic|challenge-form", page, re.I))
+
+
+WIKIPEDIA_API = "https://en.wikipedia.org/w/api.php"
+WIKIPEDIA_ARTICLE = "https://en.wikipedia.org/wiki/"
+TAG_RE = re.compile(r"<[^>]+>")
+
+
+class Wikipedia:
+    """Needs no key and does not rate-limit at this volume. Encyclopedic only: no use for news."""
+
+    name = "wikipedia"
+
+    def __init__(self, timeout: int = SEARCH_TIMEOUT) -> None:
+        self.timeout = timeout
+
+    def search(self, query: str, count: int = DEFAULT_COUNT) -> list[Result]:
+        import requests
+
+        try:
+            response = requests.get(
+                WIKIPEDIA_API,
+                params={
+                    "action": "query",
+                    "list": "search",
+                    "srsearch": query,
+                    "srlimit": str(count),
+                    "format": "json",
+                },
+                headers={"User-Agent": USER_AGENT},
+                timeout=self.timeout,
+            )
+            response.raise_for_status()
+            payload = response.json()
+        except (requests.RequestException, ValueError) as exc:
+            raise SearchError(f"{self.name} could not be reached: {exc}") from exc
+        hits = payload.get("query", {}).get("search", [])
+        if not isinstance(hits, list):
+            return []
+        results = []
+        for hit in hits:
+            if not isinstance(hit, dict):
+                continue
+            title = str(hit.get("title", "")).strip()
+            if not title:
+                continue
+            # The API wraps matched terms in <span>, which a model would read as text.
+            snippet = TAG_RE.sub("", str(hit.get("snippet", "")))
+            # Wikipedia keeps brackets and commas literal in article URLs, so they stay unescaped.
+            slug = urllib.parse.quote(title.replace(" ", "_"), safe="_(),!'")
+            results.append(Result(title=title, url=f"{WIKIPEDIA_ARTICLE}{slug}", snippet=snippet))
+        return trim(results, count)
+
+
+class Fallback:
+    """Each provider in turn. DuckDuckGo has the better index; Wikipedia is the one always up."""
+
+    name = "fallback"
+
+    def __init__(self, *providers: SearchProvider) -> None:
+        self._providers = providers
+
+    def search(self, query: str, count: int = DEFAULT_COUNT) -> list[Result]:
+        problems: list[str] = []
+        answered = False
+        for provider in self._providers:
+            try:
+                found = provider.search(query, count)
+            except SearchError as exc:
+                problems.append(f"{provider.name}: {exc}")
+                continue
+            answered = True
+            if found:
+                return found
+        if answered or not problems:
+            return []
+        raise SearchError(problems[0])
+
+
+def default_provider() -> SearchProvider:
+    """DuckDuckGo first for coverage, Wikipedia behind it so a rate limit is not a dead end."""
+    return Fallback(DuckDuckGo(), Wikipedia())

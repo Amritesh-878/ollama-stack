@@ -3,15 +3,19 @@
 from __future__ import annotations
 
 import pytest
+import requests
 import responses
 
 from ollama_stack.search import (
     HTML_ENDPOINT,
     LITE_ENDPOINT,
+    WIKIPEDIA_API,
     DuckDuckGo,
     Result,
     SearchError,
+    Wikipedia,
     as_prompt,
+    default_provider,
     parse_lite,
     trim,
 )
@@ -141,3 +145,44 @@ HTML_PAGE = """<div class="links_main links_deep result__body">
   </h2>
   <a class="result__snippet">The official home of Python.</a>
 </div>"""
+
+
+WIKI_JSON = {
+    "query": {
+        "search": [
+            {
+                "title": "Python (programming language)",
+                "snippet": 'Python <span class="searchmatch">3.14.7</span> is the latest release',
+            }
+        ]
+    }
+}
+
+
+@responses.activate
+def test_wikipedia_returns_hits_with_the_markup_stripped() -> None:
+    """The API wraps matches in spans, and a model reads leftover tags as content."""
+    responses.add(responses.GET, WIKIPEDIA_API, json=WIKI_JSON)
+    found = Wikipedia().search("python latest version")
+    assert found[0].url == "https://en.wikipedia.org/wiki/Python_(programming_language)"
+    assert "<span" not in found[0].snippet
+    assert "3.14.7" in found[0].snippet
+
+
+@responses.activate
+def test_wikipedia_carries_the_search_when_duckduckgo_is_rate_limited() -> None:
+    """DuckDuckGo rate-limits after a handful of searches; wikipedia does not."""
+    responses.add(responses.POST, LITE_ENDPOINT, body=BOT_CHECK, status=200)
+    responses.add(responses.POST, HTML_ENDPOINT, body=BOT_CHECK, status=200)
+    responses.add(responses.GET, WIKIPEDIA_API, json=WIKI_JSON)
+    found = default_provider().search("python latest version")
+    assert found and "wikipedia.org" in found[0].url
+
+
+@responses.activate
+def test_every_provider_failing_still_raises_rather_than_returning_nothing() -> None:
+    responses.add(responses.POST, LITE_ENDPOINT, body=BOT_CHECK, status=200)
+    responses.add(responses.POST, HTML_ENDPOINT, body=BOT_CHECK, status=200)
+    responses.add(responses.GET, WIKIPEDIA_API, body=requests.ConnectionError("offline"))
+    with pytest.raises(SearchError, match="duckduckgo"):
+        default_provider().search("anything")
