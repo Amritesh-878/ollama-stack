@@ -383,6 +383,12 @@ def run_query(opts: Options, prompt: str, context: str = "") -> int:
     timings = _timings(run, first_word)
     if searched:
         timings.append(f"searched {searched}x")
+    if reply.ran_out_of_window:
+        print(
+            f"note: {reply.model} used the whole {reply.num_ctx}-token window generating and was "
+            "cut off before finishing. Try --no-think, a larger --num-ctx, or a different model.",
+            file=sys.stderr,
+        )
     _status_line(opts, reply, estimate, time.perf_counter() - started, timings)
     return 0
 

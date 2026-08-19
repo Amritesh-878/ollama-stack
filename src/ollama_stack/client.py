@@ -72,6 +72,12 @@ class Reply:
     eval_count: int
     tool_calls: list[dict[str, Any]]
     sent_estimate: int = 0
+    done_reason: str = ""
+
+    @property
+    def ran_out_of_window(self) -> bool:
+        """Generation hit num_ctx and stopped. Measured: gemma4:26b filled it with thinking."""
+        return self.done_reason == "length"
 
     @property
     def prompt_budget(self) -> int:
@@ -229,6 +235,7 @@ class OllamaClient:
             num_ctx=self.num_ctx,
             prompt_eval_count=int(raw) if raw is not None else -1,
             eval_count=int(body.get("eval_count", 0)),
+            done_reason=str(body.get("done_reason", "")),
             tool_calls=calls,
             sent_estimate=self._sent_estimate,
         )

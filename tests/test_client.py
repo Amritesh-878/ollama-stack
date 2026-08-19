@@ -406,3 +406,10 @@ def test_the_send_budget_protects_against_overflow_at_the_worst_measured_ratio()
     """chars/4 under-counts code by 24% (3.03 chars/token measured), and the budget absorbs it."""
     worst_case_actual = prompt_budget(32768) * (4 / 3.03)
     assert worst_case_actual < 32768
+
+
+def test_a_reply_cut_off_at_the_window_is_visible_rather_than_silent() -> None:
+    """gemma4:26b filled 32768 tokens with thinking twice and delivered one byte each time."""
+    cut = Reply("x", "m", 32768, 10, 30584, [], done_reason="length")
+    assert cut.ran_out_of_window
+    assert not Reply("x", "m", 32768, 10, 40, [], done_reason="stop").ran_out_of_window
