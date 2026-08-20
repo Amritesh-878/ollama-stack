@@ -9,6 +9,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from ollama_stack.client import DEFAULT_HOST
 from ollama_stack.models import (
     DEFAULT_NUM_CTX,
     FAST_ALIAS,
@@ -31,6 +32,7 @@ PROVIDERS = frozenset({"duckduckgo", "wikipedia"})
 PRECEDENCE = ("flag", "env", "file", "default")
 
 DEFAULTS: dict[str, Any] = {
+    "host": DEFAULT_HOST,
     "fast_model": REGISTRY[FAST_ALIAS].tag,
     "heavy_model": REGISTRY[HEAVY_ALIAS].tag,
     "num_ctx": DEFAULT_NUM_CTX,
@@ -60,6 +62,10 @@ class Settings:
     values: dict[str, Any] = field(default_factory=lambda: dict(DEFAULTS))
     sources: dict[str, str] = field(default_factory=lambda: dict.fromkeys(DEFAULTS, "default"))
     warnings: list[str] = field(default_factory=list)
+
+    @property
+    def host(self) -> str:
+        return str(self.values["host"])
 
     @property
     def num_ctx(self) -> int:
@@ -142,6 +148,10 @@ def read_file(path: Path | None = None) -> tuple[dict[str, Any], list[str]]:
 def read_env() -> tuple[dict[str, Any], list[str]]:
     values: dict[str, Any] = {}
     warnings: list[str] = []
+    # Ollama's own variable, so pointing the daemon elsewhere moves this tool with it.
+    ollama_host = os.environ.get("OLLAMA_HOST")
+    if ollama_host:
+        values["host"] = ollama_host if "://" in ollama_host else f"http://{ollama_host}"
     for key in DEFAULTS:
         raw = os.environ.get(ENV_PREFIX + key.upper())
         if raw is None:

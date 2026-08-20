@@ -173,8 +173,9 @@ overwrite it.
 | 3 | Config file | `num_ctx = 16384` |
 | 4 | Built-in default | `32768` |
 
-Keys: `fast_model`, `heavy_model`, `num_ctx`, `keep_alive`, `search_provider`, `search_api_key`,
-`stream`. `search_api_key` is never printed in full.
+Keys: `host`, `fast_model`, `heavy_model`, `num_ctx`, `keep_alive`, `search_provider`,
+`search_api_key`, `stream`. `host` also reads Ollama's own `OLLAMA_HOST`, below `OLLAMA_STACK_HOST`
+in precedence, so pointing the daemon elsewhere moves this tool with it. `search_api_key` is never printed in full.
 
 Setting `num_ctx` below 8192 is allowed and warns, because 32768 is a measured floor rather than a
 preference. See below.

@@ -413,3 +413,12 @@ def test_a_reply_cut_off_at_the_window_is_visible_rather_than_silent() -> None:
     cut = Reply("x", "m", 32768, 10, 30584, [], done_reason="length")
     assert cut.ran_out_of_window
     assert not Reply("x", "m", 32768, 10, 40, [], done_reason="stop").ran_out_of_window
+
+
+@responses.activate
+def test_a_dead_runner_names_the_flash_attention_workaround() -> None:
+    """Measured on Blackwell: 5 of 9 models die in the FA kernel after loading successfully."""
+    body = {"error": "llama runner process has terminated: exit status 0xc0000409"}
+    responses.add(responses.POST, GENERATE, json=body, status=500)
+    with pytest.raises(OllamaError, match="OLLAMA_FLASH_ATTENTION"):
+        OllamaClient().generate("hi", "fast")

@@ -128,7 +128,7 @@ def start(
     window = num_ctx if num_ctx is not None else settings.num_ctx
     try:
         result = lifecycle.start(
-            OllamaClient(num_ctx=window), model, keep_alive=settings.keep_alive
+            OllamaClient(settings.host, num_ctx=window), model, keep_alive=settings.keep_alive
         )
     except OllamaError as exc:
         raise _fail(exc) from exc
@@ -145,9 +145,9 @@ def stop(
     model: str = typer.Option("", "--model", "-m", help="Only this one; default releases all."),
 ) -> None:
     """Release loaded models and give the card back."""
-    _settings()
+    settings = _settings()
     try:
-        result = lifecycle.stop(OllamaClient(), model or None)
+        result = lifecycle.stop(OllamaClient(settings.host), model or None)
     except OllamaError as exc:
         raise _fail(exc) from exc
     if not result.released and not result.still_resident:
@@ -167,9 +167,9 @@ def stop(
 @app.command()
 def status() -> None:
     """What is loaded, how much of the card it holds, and how long it stays."""
-    _settings()
+    settings = _settings()
     try:
-        current = lifecycle.status(OllamaClient())
+        current = lifecycle.status(OllamaClient(settings.host))
     except OllamaError as exc:
         raise _fail(exc) from exc
     if not current.residents:

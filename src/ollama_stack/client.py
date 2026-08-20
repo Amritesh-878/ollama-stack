@@ -20,6 +20,15 @@ PROBE_TIMEOUT = 10
 PIN = -1
 RELEASE = 0
 MISSING_MODEL_RE = re.compile(r"model \"?'?([^'\"]+?)'?\"? not found")
+# The runner dies in the Flash Attention kernel on some cards, after the weights already loaded,
+# so it reads as a memory fault and is not one. Measured on Blackwell: 5 of 9 models, every time.
+RUNNER_DIED_RE = re.compile(r"runner process has terminated|0xc0000409|exit status 3221225477")
+FLASH_ATTENTION_HINT = (
+    "The model loaded and then the runner died, which on some cards is the Flash Attention "
+    "kernel asking for more shared memory than the GPU grants. Turn it off and restart "
+    "Ollama: setx OLLAMA_FLASH_ATTENTION 0 on Windows, or export OLLAMA_FLASH_ATTENTION=0 "
+    "elsewhere. Ollama reads it at startup, so the restart is required."
+)
 
 
 class OllamaError(RuntimeError):
@@ -173,6 +182,8 @@ class OllamaClient:
                 detail = ""
         if not detail:
             return OllamaError(f"{path} failed against {self.host}: {exc}")
+        if RUNNER_DIED_RE.search(detail):
+            return OllamaError(f"{detail} {FLASH_ATTENTION_HINT}")
         missing = MISSING_MODEL_RE.search(detail)
         if missing:
             return OllamaError(

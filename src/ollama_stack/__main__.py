@@ -196,7 +196,7 @@ def _dry_run(opts: Options, prompt: str, context: str, settings: Settings) -> in
     from ollama_stack.models import resolve
 
     num_ctx = _num_ctx(opts, settings)
-    client = OllamaClient(num_ctx=num_ctx, think=opts.think)
+    client = OllamaClient(settings.host, num_ctx=num_ctx, think=opts.think)
     full = f"{context}\n\n{prompt}".strip() if context else prompt
     spec = resolve(opts.model)
     print(f"model     {opts.model} -> {spec.tag}")
@@ -345,7 +345,7 @@ def run_query(opts: Options, prompt: str, context: str = "") -> int:
         print(f"config: {warning}", file=sys.stderr)
     if opts.dry_run:
         return _dry_run(opts, prompt, context, settings)
-    client = OllamaClient(num_ctx=_num_ctx(opts, settings), think=opts.think)
+    client = OllamaClient(settings.host, num_ctx=_num_ctx(opts, settings), think=opts.think)
     started = time.perf_counter()
     first_word: float | None = None
     run: StreamRun | None = None
