@@ -50,6 +50,13 @@ def ask(
     raise typer.Exit(run_query(opts, prompt, piped_context()))
 
 
+def numbered(body: str) -> str:
+    """Measured: unnumbered input drifts 1 line at 42 and up to 15 at 109, because it counts."""
+    rows = body.splitlines()
+    width = len(str(len(rows)))
+    return "\n".join(f"{n:>{width}}| {line}" for n, line in enumerate(rows, 1))
+
+
 @app.command()
 def audit(
     file: Annotated[Path, typer.Argument(exists=True, dir_okay=False, readable=True)],
@@ -61,11 +68,13 @@ def audit(
                               " one-step question."),
 ) -> None:
     """Screen one file. Its silence carries no information - every file it passes is unexamined."""
-    body = file.read_text(encoding="utf-8", errors="replace")
+    body = numbered(file.read_text(encoding="utf-8", errors="replace"))
     prompt = (
-        "Review the file below for defects. Report each as file:line with the concrete failure. "
-        "Do not summarize what the file does. If you find nothing, say so and list what you "
-        "checked, so a reader can tell an examined file from an unexamined one."
+        "Review the file below for defects. Every line is prefixed with its number; cite those "
+        "numbers rather than counting, and name the function or symbol too. Report each defect "
+        "as file:line with the concrete failure. Do not summarize what the file does. If you "
+        "find nothing, say so and list what you checked, so a reader can tell an examined file "
+        "from an unexamined one."
     )
     # Screening reads one file, so a search tool would only invite the model to wander off it.
     opts = Options(

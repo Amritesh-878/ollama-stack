@@ -503,3 +503,20 @@ def test_the_audit_prompt_asks_what_was_checked_when_nothing_is_found() -> None:
     source = inspect.getsource(cli.audit)
     assert "list what you" in source
     assert "unexamined" in source
+
+
+def test_the_audit_input_carries_line_numbers() -> None:
+    """Measured on TypeScript: unnumbered input drifted 1 line at 42 and 15 at 109."""
+    from ollama_stack.cli import numbered
+
+    out = numbered("alpha\nbeta\ngamma")
+    assert out.splitlines() == ["1| alpha", "2| beta", "3| gamma"]
+
+
+def test_line_numbers_are_width_aligned_so_the_code_stays_readable() -> None:
+    from ollama_stack.cli import numbered
+
+    body = "\n".join(f"line{n}" for n in range(1, 12))
+    lines = numbered(body).splitlines()
+    assert lines[0] == " 1| line1"
+    assert lines[-1] == "11| line11"
