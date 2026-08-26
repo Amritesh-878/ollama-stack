@@ -127,3 +127,26 @@ jobs:
             exit 1
           fi
           echo "clean"
+
+  # The one check branch protection requires. Requiring the matrix jobs by name means a PR
+  # blocks forever on a check that no longer runs the moment the matrix changes; this job
+  # survives that, and adding a platform cannot quietly stop being required.
+  green:
+    name: green
+    needs: [gate, installed, public]
+    # Runs even when something upstream failed. A skipped required check never resolves.
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Every job must have succeeded
+        run: |
+          results='${{ join(needs.*.result, " ") }}'
+          echo "upstream results: $results"
+          for result in $results; do
+            # Checked against success, not against failure: cancelled and skipped are not passes.
+            if [ "$result" != "success" ]; then
+              echo "::error::a required job did not succeed ($result)"
+              exit 1
+            fi
+          done
+          echo "all green"
