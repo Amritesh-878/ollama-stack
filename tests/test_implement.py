@@ -10,8 +10,10 @@ from typing import Any
 import pytest
 import responses
 
-from ollama_stack.client import OllamaClient, estimate_tokens
+from ollama_stack.client import OllamaClient, Reply, conversation_text, estimate_tokens
 from ollama_stack.implement import handoff, harness
+from ollama_stack.implement.handoff import changes
+from ollama_stack.implement.harness import Outcome
 from ollama_stack.implement.tools import (
     DEFAULT_GATE,
     Files,
@@ -20,6 +22,7 @@ from ollama_stack.implement.tools import (
     GateRun,
     ToolError,
     as_list,
+    executes,
     is_junk,
     run_gate,
 )
@@ -526,3 +529,56 @@ def test_ollama_going_away_mid_run_stops_cleanly_with_the_turn_named(tmp_path: P
     outcome = harness.Harness(OllamaClient(), "fast", Files(repo), "task").run()
     assert outcome.finished is False
     assert any("turn 1" in note for note in outcome.notes)
+
+
+def test_a_file_the_gate_executes_cannot_be_written(tmp_path: Path) -> None:
+    """conftest.py is imported by pytest before any test, so writing it is code execution."""
+    repo = _repo(tmp_path)
+    files = Files(repo)
+    for name in ("conftest.py", "pyproject.toml", "noxfile.py", "sub/conftest.py"):
+        with pytest.raises(ToolError, match="run by the toolchain"):
+            files.create(name, "import os")
+
+
+def test_the_git_directory_is_closed_to_the_editor(tmp_path: Path) -> None:
+    """core.fsmonitor in .git/config runs on the next status, which this harness itself calls."""
+    repo = _repo(tmp_path)
+    with pytest.raises(ToolError, match="run by the toolchain"):
+        Files(repo).edit(".git/config", "[core]", "[core]\n\tfsmonitor = \"cmd /c echo x\"")
+
+
+def test_the_executed_guard_reads_dot_git_as_a_directory_not_a_prefix() -> None:
+    """lstrip takes a character set, so it turned .git/config into git/config and let it through."""
+    assert executes(".git/config")
+    assert executes("./conftest.py")
+    assert not executes("src/app.py")
+
+
+def test_an_edit_payload_is_counted_even_though_it_rides_in_tool_calls() -> None:
+    """Summing only content estimated a 400000-character edit at 0 tokens."""
+    calls = [{"function": {"name": "edit_file", "arguments": {"new_string": "x" * 40000}}}]
+    messages = [{"role": "assistant", "content": "", "tool_calls": calls}]
+    assert estimate_tokens(conversation_text(messages)) > 9000
+
+
+def test_the_clamp_signature_is_evidence_even_when_the_estimate_is_wrong() -> None:
+    """Gating it behind sent_estimate discarded a correct detection of the measured overflow."""
+    cut = Reply("x", "m", 32768, 16386, 10, [], sent_estimate=3)
+    assert cut.suspect_truncation
+    assert not Reply("x", "m", 32768, 20, 10, [], sent_estimate=15).suspect_truncation
+
+
+def test_a_gate_that_passed_before_a_later_edit_does_not_count(tmp_path: Path) -> None:
+    """Gate green, then break a file, then finish: this used to report every command exited 0."""
+    green = GateResult(runs=(GateRun("ruff", "ruff check .", 0, "ok"),))
+    outcome = Outcome(finished=True, gate=green, gate_tree="A", final_tree="B")
+    assert green.passed
+    assert outcome.stale_gate
+    assert not outcome.passed
+
+
+def test_a_created_file_appears_in_the_change_table(tmp_path: Path) -> None:
+    """numstat is tracked-only, so a new file was absent AND called a fabricated report."""
+    repo = _repo(tmp_path)
+    (repo / "brand_new.py").write_text("x = 1\n", encoding="utf-8")
+    assert any(c.path == "brand_new.py" for c in changes(repo))

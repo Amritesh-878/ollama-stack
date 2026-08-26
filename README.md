@@ -247,10 +247,12 @@ or pushes.** The code to do any of those is not in it. `--workspace` adds one ex
 may **read**, for a contract or spec the task file cites; edits are refused anywhere outside the
 repository. Without the flag, only the repository is readable.
 
-**The model gets six tools and no shell:** read a file, list tracked files, edit an exact string,
+**The model gets six tools:** read a file, list tracked files, edit an exact string,
 create a new file, run the quality gate, and finish. `edit_file` requires its `old_string` to
 appear exactly once and refuses otherwise, so a five-line change to a nine-hundred-line file is a
-five-line diff rather than a regenerated file. `write_file` refuses a path that already exists.
+five-line diff rather than a regenerated file. `write_file` refuses a path that already exists. It has no shell tool, but the gate runs
+`pytest`, so files the toolchain executes rather than tests, `conftest.py`,
+`pyproject.toml` and anything under `.git/`, are refused to both writers.
 
 **The handoff is the output, and it is not an approval.** It carries the real gate output with
 exit codes, a per-file changed-line count that flags any file with half its lines touched, the

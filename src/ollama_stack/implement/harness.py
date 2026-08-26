@@ -8,7 +8,12 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from ollama_stack.client import OllamaClient, OllamaError, estimate_tokens
+from ollama_stack.client import (
+    OllamaClient,
+    OllamaError,
+    conversation_text,
+    estimate_tokens,
+)
 from ollama_stack.implement.tools import (
     DEFAULT_GATE,
     SCHEMA,
@@ -38,8 +43,8 @@ NO_CALL_NUDGE = (
 SYSTEM = """You are implementing one task in a repository, as a Task Implementer.
 
 PLATFORM: {system} {release}. The shell is {shell}. Unix commands such as ls, head, find and cat \
-do not exist here, and you have no shell anyway: the tools below are the only way to touch \
-anything.
+do not exist here. The tools below are the only way to touch anything, and a file the \
+toolchain executes rather than tests is refused.
 
 Rules that matter more than finishing fast:
 
@@ -69,13 +74,23 @@ class Outcome:
     compactions: int = 0
     peak_prompt_tokens: int = 0
     gate_runs: int = 0
+    # The tree as it stood when the gate last ran, so a later edit cannot inherit that pass.
+    gate_tree: str = ""
+    final_tree: str = ""
     num_ctx: int = 0
     budget: int = 0
 
     @property
+    def stale_gate(self) -> bool:
+        """The gate passed, then the tree moved. It describes code no longer here."""
+        return bool(self.gate_tree) and self.gate_tree != self.final_tree
+
+    @property
     def passed(self) -> bool:
-        """A run passes only when the gate did. The model's summary has no vote here."""
-        return self.finished and self.gate is not None and self.gate.passed
+        """The gate passed AND nothing changed after it. No summary, no stale run, votes."""
+        if not (self.finished and self.gate is not None and self.gate.passed):
+            return False
+        return not self.stale_gate
 
 
 def turn_budget(client: OllamaClient) -> int:
@@ -89,6 +104,11 @@ def turn_budget(client: OllamaClient) -> int:
 def read_limit(client: OllamaClient) -> int:
     """One file may use part of the turn budget, never all of it: the conversation needs room."""
     return int(turn_budget(client) * 4 * READ_SHARE)
+
+
+def tree_state(repo: Path) -> str:
+    """Cheap fingerprint of the working tree, so a pass can be tied to the code it ran against."""
+    return git(repo, "status", "--porcelain")
 
 
 def dirty(repo: Path) -> str:
@@ -147,7 +167,8 @@ class Harness:
         )
 
     def _estimate(self, messages: list[dict[str, Any]]) -> int:
-        return estimate_tokens("\n".join(str(m.get("content", "")) for m in messages))
+        """Through conversation_text: an edit's payload rides in tool_calls, not content."""
+        return estimate_tokens(conversation_text(messages, SCHEMA))
 
     def _compact(self, messages: list[dict[str, Any]]) -> int:
         """Drops old tool output first: it is re-readable, and the task file is the boundary."""
@@ -179,6 +200,7 @@ class Harness:
         if name == "run_gate":
             result = run_gate(self._files.repo, self._gate)
             self.outcome.gate = result
+            self.outcome.gate_tree = tree_state(self._files.repo)
             self.outcome.gate_runs += 1
             verdict = "PASSED" if result.passed else f"FAILED: {', '.join(result.failures)}"
             return f"{result.transcript()}\n\ngate {verdict}"
@@ -188,6 +210,12 @@ class Harness:
         self.outcome.finished = True
         self.outcome.summary = str(args.get("summary", "")).strip()
         self.outcome.reported = as_list(args.get("files_changed"))
+        self.outcome.final_tree = tree_state(self._files.repo)
+        if self.outcome.stale_gate:
+            self.outcome.notes.append(
+                "the tree changed after the last gate run, so that pass describes code that is "
+                "no longer here. Treat this run as ungated."
+            )
         if self.outcome.gate is None:
             self.outcome.notes.append(
                 "the model finished without ever running the gate, so its summary rests on nothing"

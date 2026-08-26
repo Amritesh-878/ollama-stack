@@ -55,6 +55,34 @@ def as_list(value: Any) -> list[str]:
     return [text]
 
 
+# Files the gate or git executes before any test runs, so writing one is arbitrary code
+# execution rather than an edit. pytest imports conftest.py; git reads .git/config every command.
+EXECUTED_BY_TOOLING: tuple[str, ...] = (
+    "conftest.py",
+    "pyproject.toml",
+    "setup.py",
+    "setup.cfg",
+    "noxfile.py",
+    "tox.ini",
+    "ruff.toml",
+    ".ruff.toml",
+    "mypy.ini",
+    "pytest.ini",
+    "sitecustomize.py",
+    "usercustomize.py",
+)
+
+
+def executes(relative: str) -> bool:
+    """True for a path whose contents run during the gate, or that git acts on."""
+    # lstrip takes a character set, not a prefix: it would turn ".git/config" into "git/config".
+    posix = relative.replace("\\", "/").removeprefix("./")
+    parts = posix.split("/")
+    if ".git" in parts:
+        return True
+    return parts[-1] in EXECUTED_BY_TOOLING
+
+
 def is_junk(path: str) -> bool:
     """True for anything a build produced, so it never reaches the index or the handoff."""
     posix = path.replace("\\", "/")
@@ -189,9 +217,22 @@ class Files:
             )
         return numbered(body)
 
+    def _refuse_if_executed(self, raw: str, path: Path) -> None:
+        """One guard for both writers: edit had none, and .git/config is always an existing file."""
+        relative = str(path.relative_to(self.repo))
+        if executes(relative):
+            raise ToolError(
+                f"{raw} is run by the toolchain rather than tested by it, so writing it would "
+                "execute code outside this task. Refused. If the task genuinely needs this file "
+                "changed, say so in your summary and stop."
+            )
+        if is_junk(relative):
+            raise ToolError(f"{raw} looks like build output and will not be written")
+
     def edit(self, raw: str, old: str, new: str) -> str:
         """A non-unique match is an error, never a first-match guess: that edits the wrong line."""
         path = self._resolve(raw, (self.repo,))
+        self._refuse_if_executed(raw, path)
         if not path.is_file():
             raise ToolError(f"{raw} does not exist. Use write_file to create it.")
         if not old:
@@ -214,8 +255,7 @@ class Files:
     def create(self, raw: str, content: str) -> str:
         """Refuses a path that exists: the alternative is a whole-file rewrite by accident."""
         path = self._resolve(raw, (self.repo,))
-        if is_junk(str(path.relative_to(self.repo))):
-            raise ToolError(f"{raw} looks like build output and will not be created")
+        self._refuse_if_executed(raw, path)
         if path.exists():
             raise ToolError(f"{raw} already exists. Use edit_file; write_file is for new files.")
         path.parent.mkdir(parents=True, exist_ok=True)

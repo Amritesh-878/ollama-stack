@@ -31,9 +31,26 @@ class FileChange:
         return self.total > 0 and (self.added + self.removed) >= self.total * BIG_DIFF_SHARE
 
 
+def _created(repo: Path) -> list[str]:
+    """numstat is tracked-only, and nothing here ever stages, so a new file is invisible to it."""
+    fresh: list[str] = []
+    for line in git(repo, "status", "--porcelain").splitlines():
+        if line[:2].strip() == "??" or line.startswith("A "):
+            path = line[3:].strip().strip(chr(34))
+            if path and not is_junk(path):
+                fresh.append(path)
+    return fresh
+
+
 def changes(repo: Path) -> list[FileChange]:
-    """Committed or not, so a run that never staged anything still reports what it did."""
+    """Tracked edits plus untracked creations, because a reviewer needs to see both."""
     found: list[FileChange] = []
+    for path in _created(repo):
+        target = repo / path
+        if not target.is_file():
+            continue
+        lines = len(target.read_text(encoding="utf-8", errors="replace").splitlines())
+        found.append(FileChange(path, lines, 0, lines))
     for line in git(repo, "diff", "--numstat", "HEAD").splitlines():
         parts = line.split("\t")
         if len(parts) != 3:

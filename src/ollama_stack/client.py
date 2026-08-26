@@ -53,6 +53,24 @@ def prompt_budget(num_ctx: int) -> int:
     return max(num_ctx - GENERATION_RESERVE, num_ctx // 2)
 
 
+def conversation_text(
+    messages: list[dict[str, Any]], tools: list[dict[str, Any]] | None = None
+) -> str:
+    """Content plus tool_calls plus the schema: an edit travels in tool_calls, not content."""
+    # Imported here, not at module scope: the bare path must not pay for it.
+    import json
+
+    parts: list[str] = []
+    for message in messages:
+        parts.append(str(message.get("content", "")))
+        calls = message.get("tool_calls")
+        if calls:
+            parts.append(json.dumps(calls, default=str))
+    if tools:
+        parts.append(json.dumps(tools, default=str))
+    return "\n".join(parts)
+
+
 def estimate_tokens(text: str) -> int:
     """Characters over four: under-counts code, over-counts prose, cheap enough to run first."""
     return -(-len(text) // 4)
@@ -113,10 +131,13 @@ class Reply:
         """Only real evidence of a cut: a send-time budget says nothing about what came back."""
         if self.counts_missing:
             return True
-        # Ollama clamps to num_ctx//2, so a smaller send cannot have been cut at all.
+        # The clamp signature is evidence on its own. Gating it behind sent_estimate discarded a
+        # correct detection whenever the estimate was the thing that was wrong.
+        if self.clamped_to_half:
+            return True
         if self.sent_estimate < self.num_ctx // 2:
             return False
-        return self.read_far_less_than_sent or self.clamped_to_half
+        return self.read_far_less_than_sent
 
 
 class OllamaClient:
@@ -329,7 +350,7 @@ class OllamaClient:
     ) -> Reply:
         """Multi-turn exchange, with optional function calling."""
         spec = resolve(model)
-        self.preflight("\n".join(str(m.get("content", "")) for m in messages))
+        self.preflight(conversation_text(messages, tools))
         payload: dict[str, Any] = {"model": spec.tag, "messages": messages}
         if tools:
             payload["tools"] = tools
@@ -346,7 +367,7 @@ class OllamaClient:
     ) -> StreamRun:
         """Streamed multi-turn, so a tool loop keeps the token-by-token output of the bare path."""
         spec = resolve(model)
-        self.preflight("\n".join(str(m.get("content", "")) for m in messages))
+        self.preflight(conversation_text(messages, tools))
         payload: dict[str, Any] = {"model": spec.tag, "messages": messages}
         if tools:
             payload["tools"] = tools
