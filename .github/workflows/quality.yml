@@ -139,10 +139,14 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Every job must have succeeded
+        # Through the environment, not interpolated into the script: an Actions expression
+        # only takes single-quoted strings, and a value spliced into shell is a value that
+        # can be made to run as shell.
+        env:
+          RESULTS: ${{ join(needs.*.result, ' ') }}
         run: |
-          results='${{ join(needs.*.result, " ") }}'
-          echo "upstream results: $results"
-          for result in $results; do
+          echo "upstream results: $RESULTS"
+          for result in $RESULTS; do
             # Checked against success, not against failure: cancelled and skipped are not passes.
             if [ "$result" != "success" ]; then
               echo "::error::a required job did not succeed ($result)"
