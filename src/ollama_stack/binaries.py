@@ -24,9 +24,10 @@ def _entries(path: str | None) -> list[Path]:
     here = _here()
     kept: list[Path] = []
     for entry in raw.split(os.pathsep):
-        if not entry or entry == os.curdir:
+        if not entry:
             continue
         directory = Path(entry)
+        # This is also what rejects "." and "..", so there is no separate check for them.
         if not directory.is_absolute():
             continue
         try:

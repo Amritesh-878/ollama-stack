@@ -11,7 +11,7 @@ import pytest
 import responses
 
 from ollama_stack.client import OllamaClient, Reply, conversation_text, estimate_tokens
-from ollama_stack.implement import handoff, harness
+from ollama_stack.implement import handoff, harness, tools
 from ollama_stack.implement.handoff import changes
 from ollama_stack.implement.harness import Outcome
 from ollama_stack.implement.tools import (
@@ -207,12 +207,61 @@ def test_the_gate_runs_in_the_target_repo_through_uv_not_the_drivers_own_tools(
         return subprocess.CompletedProcess(command, 0, "ok", "")
 
     monkeypatch.setattr(subprocess, "run", fake)
+    # Said outright rather than left to the machine: whether uv is installed here is not
+    # what this test is about, and letting it decide made the test pass for that reason.
+    fake_bin = tmp_path / "bin"
+    monkeypatch.setattr(tools, "on_path", lambda name, path=None: str(fake_bin / name))
     run_gate(repo, DEFAULT_GATE)
     binaries = [Path(entry["command"][0]) for entry in seen]
     assert [b.stem for b in binaries] == ["uv", "uv", "uv"]
     # Absolute, so the repo being judged cannot supply the tool that judges it.
     assert all(b.is_absolute() for b in binaries), binaries
     assert {entry["cwd"] for entry in seen} == {repo}
+
+
+def test_git_is_run_by_full_path_not_by_bare_name(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The repo being inspected is the last directory allowed to supply the git that reads it."""
+    repo = _repo(tmp_path / "r")
+    seen: list[tuple[str, ...]] = []
+
+    def fake(command: Any, **kwargs: Any) -> subprocess.CompletedProcess[str]:
+        seen.append(tuple(command))
+        return subprocess.CompletedProcess(command, 0, "", "")
+
+    fake_bin = tmp_path / "bin"
+    monkeypatch.setattr(tools, "on_path", lambda name, path=None: str(fake_bin / name))
+    monkeypatch.setattr(subprocess, "run", fake)
+    tools.git(repo, "status", "--porcelain")
+    assert seen[0][0] == str(fake_bin / "git")
+    assert Path(seen[0][0]).is_absolute()
+
+
+def test_no_git_on_path_is_refused_rather_than_run_as_a_bare_name(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    repo = _repo(tmp_path / "r")
+    monkeypatch.setattr(tools, "on_path", lambda name, path=None: None)
+
+    def never(*args: Any, **kwargs: Any) -> Any:
+        raise AssertionError("git was run without being found on PATH")
+
+    monkeypatch.setattr(subprocess, "run", never)
+    with pytest.raises(ToolError, match="git is not on PATH"):
+        tools.git(repo, "status", "--porcelain")
+
+
+def test_a_gate_tool_that_is_not_installed_fails_the_run_rather_than_passing_it(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """No uv means nothing was checked, and nothing checked must never read as checked."""
+    repo = _repo(tmp_path / "r")
+    monkeypatch.setattr(tools, "on_path", lambda name, path=None: None)
+    result = run_gate(repo, DEFAULT_GATE)
+    assert not result.passed
+    assert result.runs[0].code == 127
+    assert "not on PATH" in result.runs[0].output
 
 
 def test_a_failing_gate_produces_a_failed_handoff_whatever_the_model_claims(

@@ -8,16 +8,40 @@ on:
     branches: [main]
   pull_request:
 
+# A superseded run reports on code nobody is looking at any more.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+# Nothing in this file needs write access to anything.
+permissions:
+  contents: read
+
 jobs:
-  python:
-    runs-on: ubuntu-latest
+  gate:
+    name: gate ${{ matrix.os }} py${{ matrix.python }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      # One green platform says nothing about the others. The program lookup, PATHEXT handling
+      # and VRAM probes are all platform-specific, this is developed on Windows, and CI used to
+      # run Linux alone: a test that only passed because the dev machine had nvidia-smi went
+      # green locally and red here, and one that only passed because CI had uv did the reverse.
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+        # The floor from requires-python and the newest, so both ends of the range are held.
+        python: ["3.12", "3.14"]
     steps:
       - uses: actions/checkout@v4
+        with:
+          # A public repo's CI has no reason to keep a credential in the git config.
+          persist-credentials: false
 
       - name: Install uv
         uses: astral-sh/setup-uv@v5
         with:
           enable-cache: true
+          python-version: ${{ matrix.python }}
 
       # --frozen fails on a stale lockfile rather than silently resolving something else.
       - name: Install
@@ -31,4 +55,75 @@ jobs:
         run: uv run mypy .
 
       - name: Tests
-        run: uv run pytest
+        run: uv run pytest -q
+
+  installed:
+    name: installed CLI ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      # Installed the way a stranger gets it, not `uv run` inside the source tree. The console
+      # script, the bare-path fast start and the argv parsing only exist once it is installed,
+      # so no unit test covers them and `o start` being unrecognised shipped once already.
+      - name: Install as a tool
+        shell: bash
+        run: uv tool install .
+
+      # Asked for rather than assumed. A POSIX $PWD does not survive GITHUB_PATH on the Windows
+      # runner, and whether uv's bin directory is already on PATH there is not ours to rely on.
+      - name: Find the installed entry point
+        shell: bash
+        run: echo "O=$(uv tool dir --bin)/o" >> "$GITHUB_ENV"
+
+      # None of these reaches the network, so they run with no Ollama anywhere.
+      - name: It runs
+        shell: bash
+        run: |
+          "$O" --version
+          "$O" --help
+          "$O" ask --help
+          "$O" config
+          "$O" --dry-run what is 10+10
+
+      # Stdlib only by design, because it runs before uv or the package exist. The system
+      # python proves that; the project environment would hide it.
+      - name: bootstrap.py runs before anything is installed
+        shell: bash
+        run: python bootstrap.py --help
+
+  public:
+    name: nothing but the product
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      # This repo is public and carries the product alone. The rule has been broken by hand
+      # before, so it is checked rather than remembered. The pattern file is the one thing
+      # exempt from its own scan.
+      - name: No scaffold, task ids or authorship trailers
+        run: |
+          patterns='(^|/)\.claude/|AGENTS\.md|PROJECT_STATE\.md|MASTER_PLAN\.md|RUNBOOK\.md|TASK-[0-9]{3}|Co-Authored-By|Generated with'
+          if git grep -InE "$patterns" -- . ':!.github/workflows/quality.yml'; then
+            echo "::error::scaffold or authorship text reached the public repo, see the matches above"
+            exit 1
+          fi
+          found=$(git ls-files | grep -E '(^|/)\.claude/|(^|/)AGENTS\.md$|(^|/)tasks/' || true)
+          if [ -n "$found" ]; then
+            echo "::error::scaffold files reached the public repo: $found"
+            exit 1
+          fi
+          echo "clean"

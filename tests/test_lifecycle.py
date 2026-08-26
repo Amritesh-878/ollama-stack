@@ -35,12 +35,19 @@ def _posts() -> list[Any]:
 
 
 def _smi(monkeypatch: pytest.MonkeyPatch, stdout: str, exc: Exception | None = None) -> None:
+    """Says nvidia-smi is installed as well as what it prints.
+
+    Both halves are needed. The lookup is real, so on a machine with no nvidia-smi these
+    tests passed for the wrong reason: no binary, no reading, and the fake output unread.
+    """
+
     def fake(*args: Any, **kwargs: Any) -> subprocess.CompletedProcess[str]:
         if exc is not None:
             raise exc
         return subprocess.CompletedProcess(args=[], returncode=0, stdout=stdout, stderr="")
 
     monkeypatch.setattr(subprocess, "run", fake)
+    monkeypatch.setattr(lifecycle, "on_path", lambda name, path=None: f"/usr/bin/{name}")
 
 
 def test_nvidia_smi_output_becomes_a_card_reading(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -62,6 +69,19 @@ def test_a_timed_out_nvidia_smi_is_unknown(monkeypatch: pytest.MonkeyPatch) -> N
 
 def test_a_failing_nvidia_smi_is_unknown(monkeypatch: pytest.MonkeyPatch) -> None:
     _smi(monkeypatch, "", exc=subprocess.CalledProcessError(returncode=9, cmd="nvidia-smi"))
+    assert lifecycle.nvidia_vram() is None
+
+
+def test_no_nvidia_smi_on_path_reads_as_unknown_rather_than_running_a_bare_name(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The lookup refuses a planted copy by returning None, so None has to mean unknown here."""
+    monkeypatch.setattr(lifecycle, "on_path", lambda name, path=None: None)
+
+    def never(*args: Any, **kwargs: Any) -> Any:
+        raise AssertionError("nvidia-smi was run without being found on PATH")
+
+    monkeypatch.setattr(subprocess, "run", never)
     assert lifecycle.nvidia_vram() is None
 
 
