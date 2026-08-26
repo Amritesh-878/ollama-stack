@@ -181,32 +181,36 @@ def test_a_model_the_wizard_itself_recommends_never_warns() -> None:
         assert not [w for w in settings.warnings if "knows about" in w], tag
 
 
-def test_a_provider_with_no_implementation_warns() -> None:
+def test_a_provider_with_no_implementation_warns_and_names_the_ones_that_exist() -> None:
     settings = config.load(flags={"search_provider": "brave"})
-    assert any("no implementation" in warning for warning in settings.warnings)
+    warning = next(w for w in settings.warnings if "no implementation" in w)
+    for known in config.PROVIDERS:
+        assert known in warning
 
 
-def test_a_search_key_is_never_shown_in_full() -> None:
-    """A key printed in full is a key in a screenshot."""
-    secret = "sk-live-abcdefghijklmnop"
-    shown = config.shown("search_api_key", secret)
-    assert secret not in shown
-    assert shown.endswith("mnop")
+def test_every_provider_config_accepts_is_one_search_can_actually_build() -> None:
+    """Two copies of the list, kept apart so the bare path never imports search. They must agree."""
+    from ollama_stack import search
+
+    assert frozenset(search.PROVIDERS) == config.PROVIDERS
+    for name in config.PROVIDERS:
+        assert search.provider_named(name) is not None
 
 
-def test_a_short_search_key_reveals_nothing_at_all() -> None:
-    assert config.shown("search_api_key", "sk-abc") == "set"
+def test_every_setting_reaches_something_that_reads_it() -> None:
+    """search_api_key sat here for weeks reading as a feature; no provider ever took a key."""
+    from ollama_stack import search
+
+    assert "search_api_key" not in config.DEFAULTS
+    assert not hasattr(search, "api_key")
 
 
-def test_an_absent_search_key_reads_as_unset() -> None:
-    assert config.shown("search_api_key", "") == "(unset)"
-
-
-def test_a_written_search_key_is_not_in_the_settings_output() -> None:
-    config.set_value("search_api_key", "sk-live-abcdefghijklmnop")
-    settings = config.load()
-    rendered = " ".join(config.shown(key, settings.values[key]) for key in config.DEFAULTS)
-    assert "sk-live-abcdefghijklmnop" not in rendered
+def test_a_key_left_in_an_old_config_file_is_ignored_rather_than_obeyed(tmp_path: Path) -> None:
+    target = tmp_path / "config.toml"
+    target.write_text('search_api_key = "sk-live-abcdefghijklmnop"\n', encoding="utf-8")
+    values, warnings = config.read_file(target)
+    assert values == {}
+    assert any("unknown key" in warning for warning in warnings)
 
 
 def test_config_repoints_a_role_without_editing_the_registry() -> None:

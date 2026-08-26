@@ -24,8 +24,10 @@ PATH_ENV = f"{ENV_PREFIX}CONFIG"
 APP_DIR = "ollama-stack"
 FILE_NAME = "config.toml"
 LOW_NUM_CTX = 8192
-SECRET_KEYS = frozenset({"search_api_key"})
-PROVIDERS = frozenset({"duckduckgo", "wikipedia"})
+# Mirrors search.PROVIDERS, which the bare path must not import for one frozenset. A test
+# fails if they drift. There is no `search_api_key` here: no provider takes one, and a
+# setting that reaches nothing is a promise the tool cannot keep.
+PROVIDERS = frozenset({"auto", "duckduckgo", "wikipedia"})
 
 # Highest first. Stated here, in `o config`, and in the README, because an undocumented
 # precedence order produces bug reports that are not bugs.
@@ -37,8 +39,7 @@ DEFAULTS: dict[str, Any] = {
     "heavy_model": REGISTRY[HEAVY_ALIAS].tag,
     "num_ctx": DEFAULT_NUM_CTX,
     "keep_alive": -1,
-    "search_provider": "duckduckgo",
-    "search_api_key": "",
+    "search_provider": "auto",
     "stream": True,
 }
 
@@ -83,9 +84,6 @@ class Settings:
     def search_provider(self) -> str:
         return str(self.values["search_provider"])
 
-    @property
-    def search_api_key(self) -> str:
-        return str(self.values["search_api_key"])
 
 
 def _coerce(key: str, value: Any) -> tuple[Any, str]:
@@ -185,7 +183,11 @@ def _advice(values: dict[str, Any]) -> list[str]:
             notes.append(f"{key} is {tag!r}, which is not a model this tool knows about")
     provider = str(values["search_provider"])
     if provider not in PROVIDERS:
-        notes.append(f"search_provider {provider!r} has no implementation; duckduckgo will be used")
+        known = ", ".join(sorted(PROVIDERS))
+        notes.append(
+            f"search_provider {provider!r} has no implementation, so search falls back to "
+            f"auto. Known: {known}"
+        )
     return notes
 
 
@@ -211,16 +213,6 @@ def apply(settings: Settings) -> None:
     """Points the two role aliases at whatever config says, before any name gets resolved."""
     set_role_tag(FAST_ALIAS, str(settings.values["fast_model"]))
     set_role_tag(HEAVY_ALIAS, str(settings.values["heavy_model"]))
-
-
-def shown(key: str, value: Any) -> str:
-    """A key printed in full is a key in a screenshot, so it never leaves here intact."""
-    if key not in SECRET_KEYS:
-        return str(value)
-    text = str(value)
-    if not text:
-        return "(unset)"
-    return f"set, ending {text[-4:]}" if len(text) > 8 else "set"
 
 
 def _as_toml(value: Any) -> str:

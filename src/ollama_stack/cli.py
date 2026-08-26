@@ -39,7 +39,11 @@ def ask(
     no_stream: bool = typer.Option(False, "--no-stream", help="Wait for the whole reply."),
     stats: bool = typer.Option(False, "--stats", help="Add wall time and the token estimate."),
     think: bool = typer.Option(False, "--think/--no-think", help="Reason before answering."),
-    web: bool = typer.Option(True, "--web/--no-web", "-w", help="Allow a web search."),
+    # Three states, not two: the default has to stay distinguishable from -w, or -w is a
+    # no-op here while it forces a search on the bare path.
+    web: bool | None = typer.Option(
+        None, "--web/--no-web", "-w", help="Force a web search, or forbid one."
+    ),
 ) -> None:
     """Send a prompt to a model. The escape for a question starting with a command name."""
     opts = Options(
@@ -48,7 +52,7 @@ def ask(
         stream=False if no_stream else None,
         stats=stats,
         think=think,
-        web=None if web else False,
+        web=web,
     )
     raise typer.Exit(run_query(opts, prompt, piped_context()))
 
@@ -198,8 +202,8 @@ def config_show(ctx: typer.Context) -> None:
     typer.echo(f"file: {config.config_path()}")
     typer.echo(f"precedence, highest first: {' > '.join(config.PRECEDENCE)}")
     for key in config.DEFAULTS:
-        shown = config.shown(key, settings.values[key])
-        typer.echo(f"  {key:16s} {shown:32s} [{settings.sources[key]}]")
+        value = str(settings.values[key])
+        typer.echo(f"  {key:16s} {value:32s} [{settings.sources[key]}]")
     for warning in settings.warnings:
         typer.secho(f"warning: {warning}", fg=typer.colors.YELLOW, err=True)
 
@@ -218,7 +222,7 @@ def config_set(key: str, value: str) -> None:
     except OSError as exc:
         typer.secho(f"error: writing {config.config_path()}: {exc}", fg=typer.colors.RED, err=True)
         raise typer.Exit(1) from None
-    typer.echo(f"{key} = {config.shown(key, written)}  -> {config.config_path()}")
+    typer.echo(f"{key} = {written}  -> {config.config_path()}")
     for note in notes:
         typer.secho(f"warning: {note}", fg=typer.colors.YELLOW, err=True)
 
@@ -234,7 +238,7 @@ def config_unset(key: str) -> None:
     except OSError as exc:
         typer.secho(f"error: writing {config.config_path()}: {exc}", fg=typer.colors.RED, err=True)
         raise typer.Exit(1) from None
-    default = config.shown(key, config.DEFAULTS[key])
+    default = config.DEFAULTS[key]
     typer.echo(
         f"{key} back to the built-in default: {default}" if removed else f"{key} was not set"
     )

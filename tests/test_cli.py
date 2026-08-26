@@ -521,3 +521,38 @@ def test_line_numbers_are_width_aligned_so_the_code_stays_readable() -> None:
     lines = numbered(body).splitlines()
     assert lines[0] == " 1| line1"
     assert lines[-1] == "11| line11"
+
+
+def _ask_web(argv: list[str], monkeypatch: pytest.MonkeyPatch) -> object:
+    """What `o ask` actually hands the query, which is the only place -w can go missing."""
+    from typer.testing import CliRunner
+
+    from ollama_stack import cli
+
+    seen: list[Any] = []
+    def record(opts: Any, prompt: str, ctx: str = "") -> int:
+        seen.append(opts)
+        return 0
+
+    monkeypatch.setattr(cli, "run_query", record)
+    result = CliRunner().invoke(cli.app, argv)
+    assert result.exit_code == 0, result.output
+    return seen[0].web
+
+
+def test_ask_w_forces_a_search_the_way_the_bare_path_does(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """-w read as True on both paths, but True was also `o ask`'s default, so it did nothing."""
+    assert _parse(["-w", "who", "won"])[0].web is True
+    assert _ask_web(["ask", "-w", "who won"], monkeypatch) is True
+
+
+def test_ask_without_a_web_flag_leaves_the_choice_to_the_model(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    assert _ask_web(["ask", "who won"], monkeypatch) is None
+
+
+def test_ask_no_web_still_withholds_the_tool(monkeypatch: pytest.MonkeyPatch) -> None:
+    assert _ask_web(["ask", "--no-web", "who won"], monkeypatch) is False

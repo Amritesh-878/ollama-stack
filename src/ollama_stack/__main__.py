@@ -271,7 +271,7 @@ def _searching(
     settings: Settings,
 ) -> tuple[SearchOutcome, float | None]:
     """The tool loop, taken whenever search is not explicitly forbidden."""
-    from ollama_stack.search import default_provider
+    from ollama_stack.search import provider_named
     from ollama_stack.tools import answer_with_search
 
     first: list[float] = []
@@ -294,7 +294,7 @@ def _searching(
             client,
             prompt,
             opts.model,
-            default_provider(),
+            provider_named(settings.search_provider),
             write,
             context=context,
             force=opts.web is True,
