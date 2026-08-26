@@ -138,6 +138,7 @@ runs `status`. Use `o ask "status of the economy"` for those.
 | `o status` | What is loaded, how much VRAM it holds, how long it stays |
 | `o ask "..."` | Ask, when the question starts with a command name |
 | `o audit file.py` | Have a model read one file and report defects |
+| `o implement task.md` | Drive a local model against a finished task file. Stops at an unaudited handoff. |
 | `o models` | List the aliases |
 | `o which coder` | Show what an alias resolves to |
 | `o config` | Show your settings and where each one came from |
@@ -227,7 +228,53 @@ Model aliases are defined in `src/ollama_stack/models.py`.
 
 ## Coming
 
-Images, follow-up questions, and an MCP server so editors can call local models as tools.
+Images and follow-up questions.
+
+---
+
+## Handing a task to a local model
+
+`o implement` reads a finished task file, drives a local model against the repository through the
+same client as everything else, and stops at a handoff marked unaudited.
+
+```sh
+o implement TASK.md --repo . --workspace ../specs
+o implement TASK.md --dry-run     # show the plan, call no model
+```
+
+It refuses a dirty working tree, works on `local/<task-file-name>`, and **never commits, merges,
+or pushes.** The code to do any of those is not in it. `--workspace` adds one extra root the model
+may **read**, for a contract or spec the task file cites; edits are refused anywhere outside the
+repository. Without the flag, only the repository is readable.
+
+**The model gets six tools and no shell:** read a file, list tracked files, edit an exact string,
+create a new file, run the quality gate, and finish. `edit_file` requires its `old_string` to
+appear exactly once and refuses otherwise, so a five-line change to a nine-hundred-line file is a
+five-line diff rather than a regenerated file. `write_file` refuses a path that already exists.
+
+**The handoff is the output, and it is not an approval.** It carries the real gate output with
+exit codes, a per-file changed-line count that flags any file with half its lines touched, the
+model's reported file list checked against `git diff`, and its summary unedited. **A failing gate
+means the handoff says failed, whatever the model claims in its summary.**
+
+| flag | default | |
+| --- | --- | --- |
+| `-m`, `--model` | `heavy` | Alias or raw tag |
+| `--repo` | `.` | Repository to change |
+| `--workspace` | none | One extra read-only root |
+| `--num-ctx` | `32768` | Context window requested |
+| `--max-turns` | `35` | Hard turn limit |
+| `--branch` | `local/<task-file-name>` | |
+| `--handoff` | beside the task file | Where to write it |
+| `--dry-run` | off | Print the plan and stop |
+
+**Long runs stay inside the window on purpose.** A thirty-five turn conversation grows past any
+context window, and a character estimate under-counts source code by about 40 percent, so the
+budget is de-rated and old tool output is dropped as the run goes. The handoff reports the peak
+`prompt_eval_count` and how many results were dropped. One file read is capped at part of that
+budget, so a very large file is refused rather than silently cut.
+
+**It is a fallback, not a replacement.** Read the diff.
 
 ---
 

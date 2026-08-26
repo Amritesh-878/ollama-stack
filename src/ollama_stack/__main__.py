@@ -53,6 +53,7 @@ commands:
   status                 what is loaded, how much VRAM, how long it stays
   ask "<question>"       ask, when the question starts with a command name
   audit <file>           have a model read one file and report defects
+  implement <task-file>  drive a local model against a finished task file
   models                 list the model aliases and which have measurements
   which <alias>          show what an alias resolves to
   config                 show settings and where each one came from

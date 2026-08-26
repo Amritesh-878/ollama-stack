@@ -124,7 +124,8 @@ def test_every_subcommand_is_reserved_so_none_can_be_eaten_as_a_prompt() -> None
     registered = set(get_group(app).commands)
     assert registered <= RESERVED
     assert {"setup", "tutorial"} <= registered
-    assert RESERVED - registered == {"implement"}
+    # Nothing is reserved-but-unbuilt any more, so the two sets must now match exactly.
+    assert registered == RESERVED
 
 
 def test_help_documents_the_reserved_word_rule_in_actionable_words(
@@ -507,14 +508,14 @@ def test_the_audit_prompt_asks_what_was_checked_when_nothing_is_found() -> None:
 
 def test_the_audit_input_carries_line_numbers() -> None:
     """Measured on TypeScript: unnumbered input drifted 1 line at 42 and 15 at 109."""
-    from ollama_stack.cli import numbered
+    from ollama_stack.implement.tools import numbered
 
     out = numbered("alpha\nbeta\ngamma")
     assert out.splitlines() == ["1| alpha", "2| beta", "3| gamma"]
 
 
 def test_line_numbers_are_width_aligned_so_the_code_stays_readable() -> None:
-    from ollama_stack.cli import numbered
+    from ollama_stack.implement.tools import numbered
 
     body = "\n".join(f"line{n}" for n in range(1, 12))
     lines = numbered(body).splitlines()

@@ -10,6 +10,8 @@ import typer
 from ollama_stack import config, lifecycle
 from ollama_stack.__main__ import Options, piped_context, run_query
 from ollama_stack.client import OllamaClient, OllamaError
+from ollama_stack.implement import handoff, harness
+from ollama_stack.implement.tools import Files, ToolError, numbered
 from ollama_stack.lifecycle import Resident, Vram
 from ollama_stack.models import DEFAULT_ALIAS, HEAVY_ALIAS, REGISTRY, resolve
 
@@ -23,7 +25,8 @@ app = typer.Typer(
         "`o config`, and the precedence is flag > env (OLLAMA_STACK_*) > file > built-in. A "
         "question whose FIRST word is one of the commands above runs that command instead, so "
         "`o status of the economy` reports what is loaded - ask it as a question with "
-        '`o ask "status of the economy"`. implement is reserved the same way before it exists.'
+        '`o ask "status of the economy"`. `o implement` drives a local model against a finished '
+        "task file and stops at a handoff marked unaudited; it never merges and never pushes."
     ),
 )
 
@@ -48,13 +51,6 @@ def ask(
         web=None if web else False,
     )
     raise typer.Exit(run_query(opts, prompt, piped_context()))
-
-
-def numbered(body: str) -> str:
-    """Measured: unnumbered input drifts 1 line at 42 and up to 15 at 109, because it counts."""
-    rows = body.splitlines()
-    width = len(str(len(rows)))
-    return "\n".join(f"{n:>{width}}| {line}" for n, line in enumerate(rows, 1))
 
 
 @app.command()
@@ -122,7 +118,7 @@ def _settings() -> config.Settings:
     return settings
 
 
-def _fail(exc: OllamaError) -> typer.Exit:
+def _fail(exc: OllamaError | ToolError) -> typer.Exit:
     typer.secho(f"error: {exc}", fg=typer.colors.RED, err=True)
     return typer.Exit(1)
 
@@ -292,6 +288,82 @@ def setup(
         typer.secho(f"error: {exc}", fg=typer.colors.RED, err=True)
         raise typer.Exit(2) from exc
     raise typer.Exit(code)
+
+
+@app.command()
+def implement(
+    task: Annotated[Path, typer.Argument(exists=True, dir_okay=False, readable=True)],
+    model: str = typer.Option(HEAVY_ALIAS, "--model", "-m", help="Registry alias or raw tag."),
+    repo: str = typer.Option(".", "--repo", help="Repository to work in."),
+    workspace: str = typer.Option(
+        "", "--workspace", help="Extra read-only root, for a contract the task file cites."
+    ),
+    num_ctx: int | None = typer.Option(None, "--num-ctx", help="Context window to request."),
+    max_turns: int = typer.Option(harness.MAX_TURNS, "--max-turns", help="Hard turn limit."),
+    handoff_to: str = typer.Option(
+        "", "--handoff", help="Where to write it; default is beside the task file."
+    ),
+    branch_name: str = typer.Option("", "--branch", help="Default is local/<task file stem>."),
+    dry_run: bool = typer.Option(False, "--dry-run", help="Show the plan and call no model."),
+) -> None:
+    """Drive a local model against one finished task file. Stops at an unaudited handoff."""
+    settings = _settings()
+    root = Path(repo).resolve()
+    # Never inferred from a sibling directory: that assumption has broken on other machines.
+    mounted = Path(workspace).resolve() if workspace else None
+    target = branch_name or f"local/{task.stem.lower()}"
+    window = num_ctx if num_ctx is not None else settings.num_ctx
+    client = OllamaClient(settings.host, num_ctx=window)
+    written = Path(handoff_to) if handoff_to else task.with_suffix(".handoff.md")
+    if mounted is not None and not mounted.is_dir():
+        typer.secho(
+            f"error: --workspace {workspace} is not a directory", fg=typer.colors.RED, err=True
+        )
+        raise typer.Exit(2)
+    if dry_run:
+        typer.echo(f"repo       {root}")
+        typer.echo(f"workspace  {mounted or 'none, so only the repo is readable'}")
+        typer.echo(f"model      {model} -> {resolve(model).tag}")
+        typer.echo(f"num_ctx    {window}, harness turn budget {harness.turn_budget(client)}")
+        typer.echo(f"branch     {target}")
+        typer.echo(f"turns      up to {max_turns}")
+        typer.echo(f"handoff    {written}")
+        raise typer.Exit(0)
+    try:
+        pending = harness.dirty(root)
+    except ToolError as exc:
+        raise _fail(exc) from exc
+    if pending:
+        typer.secho(
+            f"error: {root} has uncommitted changes, so what this run changed could not be told "
+            f"apart from what was already there. Commit or stash first:\n{pending}",
+            fg=typer.colors.RED,
+            err=True,
+        )
+        raise typer.Exit(2)
+    try:
+        harness.branch(root, target)
+    except ToolError as exc:
+        raise _fail(exc) from exc
+    typer.echo(f"on {target}, driving {resolve(model).tag}", err=True)
+    run = harness.Harness(
+        client,
+        model,
+        Files(root, mounted, harness.read_limit(client)),
+        task.read_text(encoding="utf-8", errors="replace"),
+        max_turns=max_turns,
+    )
+    outcome = run.run()
+    written.write_text(
+        handoff.render(outcome, root, task.stem, resolve(model).tag, target), encoding="utf-8"
+    )
+    typer.echo(f"handoff written to {written}")
+    typer.secho(
+        "NOT AUDITED. Re-run the gate yourself and read the diff before this goes anywhere.",
+        fg=typer.colors.YELLOW,
+        err=True,
+    )
+    raise typer.Exit(0 if outcome.passed else 1)
 
 
 @app.command()
