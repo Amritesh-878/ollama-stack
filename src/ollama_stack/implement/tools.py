@@ -8,6 +8,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from ollama_stack.binaries import on_path
+
 # Never staged whatever the target repo ignores: __pycache__ broke a final `git add` once even
 # with exclude pathspecs, so the exclusion lives here rather than in a .gitignore we do not own.
 JUNK: tuple[str, ...] = (
@@ -91,10 +93,13 @@ def is_junk(path: str) -> bool:
 
 
 def git(repo: Path, *args: str) -> str:
-    """Read-only by construction: nothing here stages, commits or pushes."""
+    """Reads and writes the working tree; nothing here commits, merges or pushes."""
+    binary = on_path("git")
+    if binary is None:
+        raise ToolError("git is not on PATH, so the repository cannot be inspected")
     try:
         done = subprocess.run(
-            ["git", *args], cwd=repo, capture_output=True, text=True,
+            [binary, *args], cwd=repo, capture_output=True, text=True,
             timeout=GIT_TIMEOUT, check=True,
         )
     except FileNotFoundError as exc:
@@ -158,9 +163,15 @@ def run_gate(repo: Path, gate: tuple[Gate, ...] = DEFAULT_GATE) -> GateResult:
     runs: list[GateRun] = []
     for step in gate:
         label = " ".join(step.command)
+        # Resolved off PATH, never taken bare: the repo under test is the one directory that
+        # must not get to supply the tool that judges it.
+        binary = on_path(step.command[0])
+        if binary is None:
+            runs.append(GateRun(step.label, label, 127, f"{step.command[0]} is not on PATH"))
+            break
         try:
             done = subprocess.run(
-                step.command, cwd=repo, capture_output=True, text=True,
+                [binary, *step.command[1:]], cwd=repo, capture_output=True, text=True,
                 timeout=GATE_TIMEOUT, check=False,
             )
             output, code = (done.stdout + done.stderr), done.returncode

@@ -64,14 +64,16 @@ def test_the_piping_demo_file_is_small_enough_to_survive_the_context_guard() -> 
 def test_the_launcher_prefers_the_o_on_path_so_the_run_proves_the_install(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setattr("ollama_stack.tutorial.shutil.which", lambda name: "/usr/local/bin/o")
+    monkeypatch.setattr(
+        "ollama_stack.tutorial.on_path", lambda name, path=None: "/usr/local/bin/o"
+    )
     assert tutorial.launcher() == ["/usr/local/bin/o"]
 
 
 def test_the_launcher_falls_back_to_the_module_when_o_is_not_on_path(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setattr("ollama_stack.tutorial.shutil.which", lambda name: None)
+    monkeypatch.setattr("ollama_stack.tutorial.on_path", lambda name, path=None: None)
     assert tutorial.launcher()[-2:] == ["-m", "ollama_stack"]
 
 

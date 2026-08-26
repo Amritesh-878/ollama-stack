@@ -208,7 +208,10 @@ def test_the_gate_runs_in_the_target_repo_through_uv_not_the_drivers_own_tools(
 
     monkeypatch.setattr(subprocess, "run", fake)
     run_gate(repo, DEFAULT_GATE)
-    assert [entry["command"][0] for entry in seen] == ["uv", "uv", "uv"]
+    binaries = [Path(entry["command"][0]) for entry in seen]
+    assert [b.stem for b in binaries] == ["uv", "uv", "uv"]
+    # Absolute, so the repo being judged cannot supply the tool that judges it.
+    assert all(b.is_absolute() for b in binaries), binaries
     assert {entry["cwd"] for entry in seen} == {repo}
 
 

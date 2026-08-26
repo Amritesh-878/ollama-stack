@@ -6,6 +6,7 @@ import platform
 import subprocess
 from dataclasses import dataclass
 
+from ollama_stack.binaries import on_path
 from ollama_stack.lifecycle import MIB, Vram, nvidia_vram
 
 PROBE_TIMEOUT = 5
@@ -80,9 +81,14 @@ CPU_TIER = Tier("CPU only / unknown", -1.0, QWEN_08B, ())
 
 
 def _run(command: list[str]) -> str | None:
+    """The probe is resolved to a real path first: a bare name would find the repo it is run in."""
+    binary = on_path(command[0])
+    if binary is None:
+        return None
     try:
         done = subprocess.run(
-            command, capture_output=True, text=True, timeout=PROBE_TIMEOUT, check=True
+            [binary, *command[1:]], capture_output=True, text=True,
+            timeout=PROBE_TIMEOUT, check=True,
         )
     except (OSError, subprocess.SubprocessError):
         return None

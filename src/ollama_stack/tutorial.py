@@ -2,10 +2,11 @@
 
 from __future__ import annotations
 
-import shutil
 import subprocess
 import sys
 from dataclasses import dataclass
+
+from ollama_stack.binaries import on_path
 
 SAMPLE = '''def total(items):
     """Sum the prices, skipping anything that has been refunded."""
@@ -97,7 +98,7 @@ LESSONS: tuple[Lesson, ...] = (
 
 def launcher() -> list[str]:
     """Prefer the `o` on PATH, so the tutorial proves the install rather than bypassing it."""
-    found = shutil.which("o")
+    found = on_path("o")
     if found is not None:
         return [found]
     return [sys.executable, "-m", "ollama_stack"]

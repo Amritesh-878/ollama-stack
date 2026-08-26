@@ -188,7 +188,7 @@ def test_declining_the_global_install_leaves_a_working_uv_run(
 
 def test_the_global_install_needs_uv_and_a_working_tree(monkeypatch: pytest.MonkeyPatch) -> None:
     """uvx runs from a wheel, where there is no tree to install editable from."""
-    monkeypatch.setattr("ollama_stack.setup.shutil.which", lambda name: None)
+    monkeypatch.setattr("ollama_stack.setup.on_path", lambda name, path=None: None)
     report = Report()
     setup.global_install(report)
     assert report.failures

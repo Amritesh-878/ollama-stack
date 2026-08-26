@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import os
 import platform
-import shutil
 import subprocess
 import sys
 import time
@@ -12,6 +11,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from ollama_stack import config
+from ollama_stack.binaries import on_path
 from ollama_stack.client import OllamaClient, OllamaError
 from ollama_stack.hardware import Gpu, Model, Tier, detect, shortfall_mib, tier_for
 
@@ -132,7 +132,7 @@ def _numbered(question: str, options: list[str], default: str) -> str:
 
 
 def ollama_binary() -> str | None:
-    return shutil.which("ollama")
+    return on_path("ollama")
 
 
 def install_hint() -> str:
@@ -299,12 +299,12 @@ def resolve_on_path() -> str | None:
         for entry in os.environ.get("PATH", "").split(os.pathsep)
         if entry and Path(entry).resolve() not in here
     ]
-    return shutil.which("o", path=os.pathsep.join(outside))
+    return on_path("o", path=os.pathsep.join(outside))
 
 
 def global_install(report: Report) -> None:
     """--editable on purpose: a plain install snapshots the code and git pull then changes none."""
-    uv = shutil.which("uv")
+    uv = on_path("uv")
     root = repo_root()
     if uv is None or root is None:
         report.o_on_path = False

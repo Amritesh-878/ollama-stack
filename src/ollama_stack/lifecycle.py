@@ -9,6 +9,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any
 
+from ollama_stack.binaries import on_path
 from ollama_stack.client import PIN, OllamaClient, OllamaError
 from ollama_stack.models import resolve
 
@@ -120,9 +121,12 @@ def _parsed_time(raw: str) -> datetime | None:
 
 def nvidia_vram() -> Vram | None:
     """None when nvidia-smi is absent or says something unparseable, which is a normal state."""
+    binary = on_path(SMI)
+    if binary is None:
+        return None
     try:
         done = subprocess.run(
-            [SMI, "--query-gpu=memory.used,memory.total", "--format=csv,noheader,nounits"],
+            [binary, "--query-gpu=memory.used,memory.total", "--format=csv,noheader,nounits"],
             capture_output=True,
             text=True,
             timeout=SMI_TIMEOUT,
