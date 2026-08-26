@@ -100,3 +100,33 @@ def test_it_agrees_with_the_standard_library_when_nothing_is_planted(
             continue
         assert found is not None, name
         assert Path(found).resolve() == Path(expected).resolve(), name
+
+
+def test_a_name_carrying_a_separator_is_refused_unless_it_is_absolute(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """`sub/tool` is a program under the working directory wearing a different hat."""
+    work = tmp_path / "work"
+    (work / "sub").mkdir(parents=True)
+    _plant(work / "sub", "toolname")
+    monkeypatch.chdir(work)
+    assert on_path(f"sub/toolname{EXE}") is None
+
+
+def test_an_absolute_name_is_taken_as_given_and_returned_absolute(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A caller naming a full path chose it deliberately, so PATH is not consulted at all."""
+    real = tmp_path / "bin"
+    real.mkdir()
+    planted = _plant(real, "toolname")
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("PATH", "")
+    found = on_path(str(planted))
+    assert found is not None
+    assert Path(found).is_absolute()
+    assert Path(found) == planted
+
+
+def test_an_absolute_name_that_is_not_there_is_none_rather_than_a_guess(tmp_path: Path) -> None:
+    assert on_path(str(tmp_path / "missing" / "toolname")) is None

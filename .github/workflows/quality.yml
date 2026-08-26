@@ -114,16 +114,25 @@ jobs:
       # This repo is public and carries the product alone. The rule has been broken by hand
       # before, so it is checked rather than remembered. The pattern file is the one thing
       # exempt from its own scan.
+      # Two scans, because they answer different questions and neither covers the other.
+      # CONTENT catches a product file that points at the private repo. NAMES catches a
+      # scaffold file committed here at all, which content matching misses entirely: a file
+      # called MASTER_PLAN.md whose text never says "MASTER_PLAN" is invisible to git grep.
       - name: No scaffold, task ids or authorship trailers
         run: |
-          patterns='(^|/)\.claude/|AGENTS\.md|PROJECT_STATE\.md|MASTER_PLAN\.md|RUNBOOK\.md|TASK-[0-9]{3}|Co-Authored-By|Generated with'
-          if git grep -InE "$patterns" -- . ':!.github/workflows/quality.yml'; then
+          content='AGENTS\.md|CLAUDE\.md|PROJECT_STATE\.md|MASTER_PLAN\.md|RUNBOOK\.md|TASK-[0-9]{3}|Co-Authored-By|Generated with'
+          names='(^|/)(\.claude|\.codex|\.cursor)/|(^|/)(AGENTS|CLAUDE|PROJECT_STATE|MASTER_PLAN|RUNBOOK)\.(md|docx)$|(^|/)(tasks|decisions|completed|audits|templates)/'
+          fail=0
+          if git grep -InE "$content" -- . ':!.github/workflows/quality.yml'; then
             echo "::error::scaffold or authorship text reached the public repo, see the matches above"
-            exit 1
+            fail=1
           fi
-          found=$(git ls-files | grep -E '(^|/)\.claude/|(^|/)AGENTS\.md$|(^|/)tasks/' || true)
-          if [ -n "$found" ]; then
-            echo "::error::scaffold files reached the public repo: $found"
+          named=$(git ls-files | grep -E "$names" || true)
+          if [ -n "$named" ]; then
+            echo "::error::scaffold files reached the public repo: $named"
+            fail=1
+          fi
+          if [ "$fail" -ne 0 ]; then
             exit 1
           fi
           echo "clean"

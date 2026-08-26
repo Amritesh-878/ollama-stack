@@ -68,8 +68,14 @@ def on_path(name: str, path: str | None = None) -> str | None:
     full path it returns rather than the bare name.
     """
     if os.path.dirname(name):
-        # Already a path, so it is the caller's own choice and not a search at all.
-        return name if _runnable(Path(name)) else None
+        # Already a path rather than a search, so PATH is not consulted. Absolute is the
+        # only form accepted: a relative one names a program underneath the working
+        # directory, which is the single thing this module exists to refuse, and it would
+        # be re-resolved anyway against whatever cwd the caller happened to pass.
+        candidate = Path(name)
+        if not candidate.is_absolute() or not _runnable(candidate):
+            return None
+        return name
     for directory in _entries(path):
         for suffix in _suffixes(name):
             candidate = directory / (name + suffix)
