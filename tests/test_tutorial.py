@@ -53,7 +53,7 @@ def test_the_search_step_says_plainly_that_a_sourced_answer_can_still_be_wrong()
 
 
 def test_the_piping_demo_file_is_small_enough_to_survive_the_context_guard() -> None:
-    """The 84 KB refusal is real until TASK-016 lands, so this demo must stay well under it."""
+    """The refusal at the prompt budget is real, so this demo must stay well under it."""
     from ollama_stack.client import estimate_tokens, prompt_budget
 
     lesson = next(item for item in LESSONS if item.key == "C7")

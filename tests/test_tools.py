@@ -68,7 +68,7 @@ def _run(provider: FakeProvider, **kwargs: Any) -> tuple[Any, list[str]]:
 
 
 def test_a_stringified_arguments_object_still_yields_a_query() -> None:
-    """Arguments have arrived as JSON text rather than an object before, per BRAINSTORM 2b."""
+    """Arguments have arrived as JSON text rather than an object before now, so both parse."""
     call = {"function": {"name": "web_search", "arguments": '{"query": "hello"}'}}
     assert query_of(call) == "hello"
 

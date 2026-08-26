@@ -21,7 +21,7 @@ def test_both_roles_exist_in_the_registry() -> None:
 
 
 def test_a_bare_question_goes_to_the_small_model() -> None:
-    """The whole point of TASK-004: the always-warm model is 4 GiB, not 16."""
+    """The whole point of the fast role: the always-warm model is 4 GiB, not 16."""
     assert DEFAULT_ALIAS == FAST_ALIAS
     assert REGISTRY[DEFAULT_ALIAS].tag == "qwen3.5:4b"
 
@@ -53,7 +53,7 @@ def test_an_unknown_tag_is_passed_through_as_unmeasured() -> None:
 
 
 def test_only_the_heavy_role_is_flagged_measured() -> None:
-    """TASK-009 benchmarked heavy for quality; the fast role has latency figures only."""
+    """Only heavy has a quality benchmark behind it; the fast role has latency figures."""
     assert REGISTRY[HEAVY_ALIAS].measured
     assert not REGISTRY[FAST_ALIAS].measured
 

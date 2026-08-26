@@ -215,7 +215,7 @@ def test_nothing_above_ascii_is_written_to_a_cp1252_console(
 
 
 def test_the_wizard_never_hard_codes_a_context_window_number() -> None:
-    """TASK-016 moves these, and a literal here would go stale silently."""
+    """Read from the module, never duplicated: a literal here would go stale silently."""
     source = Path(setup.__file__).read_text(encoding="utf-8")
     for stale in ("16384", "24576", "32768"):
         assert stale not in source, stale
