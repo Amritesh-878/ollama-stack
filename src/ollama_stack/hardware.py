@@ -96,18 +96,27 @@ def _run(command: list[str]) -> str | None:
 
 
 def _rocm_vram() -> Vram | None:
-    """AMD reports bytes here, unlike nvidia-smi's MiB."""
+    """AMD reports bytes here, unlike nvidia-smi's MiB.
+
+    One card at a time. Taking max total and min used across the whole file paired the
+    biggest card's size with the emptiest card's usage: two cards at 8 GB idle and 24 GB
+    nearly full reported 24460 MiB free when no card had more than 8092.
+    """
     out = _run(["rocm-smi", "--showmeminfo", "vram", "--csv"])
     if not out:
         return None
-    numbers = [int(f) for line in out.splitlines() for f in line.split(",") if f.strip().isdigit()]
-    if not numbers:
+    cards: list[Vram] = []
+    for line in out.splitlines():
+        numbers = [int(f) for f in line.split(",") if f.strip().lstrip("-").isdigit()]
+        if len(numbers) < 2:
+            continue
+        total, used = max(numbers) // MIB, min(numbers) // MIB
+        if total > 0:
+            cards.append(Vram(used, total))
+    if not cards:
         return None
-    total = max(numbers) // MIB
-    used = min(numbers) // MIB if len(numbers) > 1 else 0
-    if total <= 0:
-        return None
-    return Vram(used, total)
+    # The card with the most room, because a model loads onto one card, not onto the sum.
+    return max(cards, key=lambda card: card.free_mib)
 
 
 def _metal_total_mib() -> int | None:

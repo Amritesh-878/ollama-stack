@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import subprocess
+import sys
 from collections.abc import Iterator
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
@@ -130,3 +132,60 @@ def test_an_unrunnable_command_is_caught_rather_than_raising(
     lesson = Lesson("CX", "o nope", ["nope"], "nothing")
     assert tutorial.execute(lesson) is False
     assert "could not run it" in capsys.readouterr().out
+
+
+def test_the_piping_lesson_names_a_command_that_exists_on_this_platform() -> None:
+    """It taught `type sample.py`, which is Windows-only and named a file nobody created."""
+    lesson = next(step for step in tutorial.LESSONS if step.key == "C7")
+    expected = "type" if sys.platform == "win32" else "cat"
+    assert lesson.shown.startswith(f"{expected} ")
+    assert lesson.creates is not None
+
+
+def test_every_lesson_that_shows_a_file_also_creates_it() -> None:
+    for lesson in tutorial.LESSONS:
+        if "sample.py" in lesson.shown:
+            assert lesson.creates is not None, lesson.key
+            assert lesson.creates[0] == str(tutorial.SAMPLE_PATH)
+
+
+def _swallow_stdin(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The lesson pipes the sample in, so the launcher only has to read and exit."""
+    reader = [sys.executable, "-c", "import sys; sys.stdin.read()"]
+    monkeypatch.setattr(tutorial, "launcher", lambda: reader)
+
+
+def test_running_the_lesson_writes_the_file_the_command_refers_to(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    lesson = next(step for step in tutorial.LESSONS if step.key == "C7")
+    target = tmp_path / "nested" / "sample.py"
+    monkeypatch.setattr(
+        tutorial, "LESSONS", (replace(lesson, creates=(str(target), tutorial.SAMPLE)),)
+    )
+    _swallow_stdin(monkeypatch)
+    tutorial.execute(tutorial.LESSONS[0])
+    written = target
+    assert written.is_file()
+    assert "def total" in written.read_text(encoding="utf-8")
+
+
+def test_a_file_the_user_already_has_is_never_overwritten(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Their sample.py is theirs, and a tutorial is not a reason to lose it."""
+    lesson = next(step for step in tutorial.LESSONS if step.key == "C7")
+    theirs = tmp_path / "sample.py"
+    lesson = replace(lesson, creates=(str(theirs), tutorial.SAMPLE))
+    mine = "# mine" + chr(10)
+    theirs.write_text(mine, encoding="utf-8")
+    _swallow_stdin(monkeypatch)
+    tutorial.execute(lesson)
+    assert theirs.read_text(encoding="utf-8") == mine
+
+
+def test_the_pipe_command_is_right_on_both_platforms_not_just_this_one() -> None:
+    """Asserting only this machine's answer made the test tautological on Windows."""
+    assert tutorial.cat_for("win32") == "type"
+    for platform in ("linux", "darwin", "freebsd"):
+        assert tutorial.cat_for(platform) == "cat", platform

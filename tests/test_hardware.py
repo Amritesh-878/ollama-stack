@@ -113,3 +113,43 @@ def test_a_real_pulled_size_overrides_the_table_estimate() -> None:
     card = Gpu("nvidia", 8192, 2000, "test")
     assert shortfall_mib(model, card) == 0
     assert shortfall_mib(model, card, size_bytes=9_000_000_000) > 0
+
+
+MIB = 1024 * 1024
+
+
+def _rocm_csv(cards: list[tuple[int, int]]) -> str:
+    """rocm-smi reports bytes, one line per card."""
+    rows = [f"card{i}, {total * MIB}, {used * MIB}" for i, (total, used) in enumerate(cards)]
+    return chr(10).join(rows) + chr(10)
+
+
+def test_two_amd_cards_are_read_one_at_a_time_not_mixed(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """max total with min used paired the biggest card's size to the emptiest card's usage."""
+    cards = [(8192, 100), (24560, 23000)]
+    monkeypatch.setattr(hardware, "_run", lambda command: _rocm_csv(cards))
+    vram = hardware._rocm_vram()
+    assert vram is not None
+    # 8092 is what the idle card really has. 24460 was the old answer and no card had it.
+    assert vram.free_mib == 8092
+
+
+def test_the_amd_card_with_the_most_room_is_the_one_reported(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A model loads onto one card, so the useful figure is the best single card."""
+    cards = [(24560, 765), (16368, 11444)]
+    monkeypatch.setattr(hardware, "_run", lambda command: _rocm_csv(cards))
+    vram = hardware._rocm_vram()
+    assert vram is not None
+    assert (vram.total_mib, vram.used_mib) == (24560, 765)
+
+
+def test_amd_output_with_no_numbers_is_unknown_rather_than_a_crash(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    noise = "device, name" + chr(10) + "card0, gfx1100" + chr(10)
+    monkeypatch.setattr(hardware, "_run", lambda command: noise)
+    assert hardware._rocm_vram() is None

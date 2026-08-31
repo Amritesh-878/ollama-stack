@@ -125,9 +125,14 @@ def _parse(argv: list[str]) -> tuple[Options, list[str]]:
             index += 2
         elif token == "--num-ctx":
             raw = _value(argv, index, token)
-            if not raw.isdigit() or int(raw) <= 0:
+            # int(), not isdigit(): the two disagree on superscripts and circled digits.
+            try:
+                window = int(raw)
+            except ValueError:
+                raise UsageError(f"{token} wants a positive number, got {raw!r}") from None
+            if window <= 0:
                 raise UsageError(f"{token} wants a positive number, got {raw!r}")
-            opts.num_ctx = int(raw)
+            opts.num_ctx = window
             index += 2
         elif token == "--no-stream":
             opts.stream = False

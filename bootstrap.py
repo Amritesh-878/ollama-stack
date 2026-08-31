@@ -12,6 +12,10 @@ NEEDED = (3, 12)
 ROOT = Path(__file__).resolve().parent
 WINDOWS = platform.system() == "Windows"
 
+# Set by --yes. Consent to fetching and running someone else's installer is not something
+# a missing terminal can give on the user's behalf.
+ASSUME_YES = False
+
 UV_PS = "irm https://astral.sh/uv/install.ps1 | iex"
 UV_INSTALL_WINDOWS = f'powershell -ExecutionPolicy ByPass -c "{UV_PS}"'
 UV_INSTALL_UNIX = "curl -LsSf https://astral.sh/uv/install.sh | sh"
@@ -33,9 +37,17 @@ def say(message: str = "") -> None:
     print(message, flush=True)
 
 
-def ask(question: str, default: bool = True) -> bool:
-    """No TTY means take the default rather than blocking on input nobody can give."""
+def ask(question: str, default: bool = True, *, installs: bool = False) -> bool:
+    """No TTY means take the default rather than blocking on input nobody can give.
+
+    Except when saying yes downloads and runs someone else's code. Piping into this file
+    used to fetch and execute the uv installer with nobody having agreed to it, so that
+    answer has to be given out loud with --yes.
+    """
     if not sys.stdin.isatty():
+        if installs and not ASSUME_YES:
+            say(f"{question} [no terminal, so no. Pass --yes to agree in advance.]")
+            return False
         say(f"{question} [no terminal, assuming {'yes' if default else 'no'}]")
         return default
     suffix = "[Y/n]" if default else "[y/N]"
@@ -81,7 +93,7 @@ def offer_uv() -> str | None:
     command = UV_INSTALL_WINDOWS if WINDOWS else UV_INSTALL_UNIX
     say("uv is not installed. It manages the Python environment for this tool.")
     say(f"  {command}")
-    if not ask("Install uv now?"):
+    if not ask("Install uv now?", installs=True):
         say("Fine - falling back to venv and pip.")
         return None
     shell = ["powershell", "-ExecutionPolicy", "ByPass", "-c", UV_PS]
@@ -108,7 +120,7 @@ def uv_supplies_python(uv: str) -> bool:
     """uv can fetch an interpreter, which is why the uv check runs before the version check."""
     wanted = f"{NEEDED[0]}.{NEEDED[1]}"
     say(f"{version_text()}. uv can install one.")
-    if not ask(f"Let uv install Python {wanted}?"):
+    if not ask(f"Let uv install Python {wanted}?", installs=True):
         return False
     code, error = run([uv, "python", "install", wanted])
     if code != 0:
@@ -171,6 +183,9 @@ runs the setup wizard. Uses only the standard library, so it works before
 anything is installed.
 
   --help          show this and do nothing else
+  --yes           agree in advance to installing uv and a Python, for use with no
+                  terminal. Without it, a run with nothing attached to stdin installs
+                  nothing rather than assuming you would have said yes.
 
 Anything else is passed to the wizard, which has its own flags:
 
@@ -181,8 +196,12 @@ Run `o setup --help` once installed for the wizard's own help."""
 
 
 def main(argv: list[str] | None = None) -> int:
+    global ASSUME_YES
     _utf8()
     passthrough = list(sys.argv[1:] if argv is None else argv)
+    if "--yes" in passthrough:
+        ASSUME_YES = True
+        passthrough = [arg for arg in passthrough if arg != "--yes"]
     # Asking what a script does must not install anything, so this returns before any side effect.
     if "--help" in passthrough or "-h" in passthrough:
         print(USAGE)

@@ -97,7 +97,11 @@ def _coerce(key: str, value: Any) -> tuple[Any, str]:
         if isinstance(value, bool) or not isinstance(value, int):
             return None, f"{key} wants a whole number, got {value!r}"
         return value, ""
-    return str(value), ""
+    # Named, not stringified. str() turned `host = 123` into "123" and a list into
+    # "[1, 2]", so the connection failed later with nothing pointing at the config.
+    if not isinstance(value, str):
+        return None, f"{key} wants text in quotes, got {value!r}"
+    return value, ""
 
 
 def coerce_text(key: str, raw: str) -> tuple[Any, str]:
@@ -118,17 +122,25 @@ def coerce_text(key: str, raw: str) -> tuple[Any, str]:
     return raw, ""
 
 
-def read_file(path: Path | None = None) -> tuple[dict[str, Any], list[str]]:
-    """A missing file is normal; a broken one names the problem and contributes nothing."""
+class UnreadableConfigError(RuntimeError):
+    """The file exists and could not be parsed, which is not the same as it being empty."""
+
+
+def _read(path: Path | None = None) -> tuple[dict[str, Any], list[str], bool]:
+    """Values, warnings, and whether the file parsed at all.
+
+    The third is the important one. Treating an unparseable file as an empty one is what
+    let a rewrite delete every setting in it.
+    """
     target = config_path() if path is None else path
     try:
         raw = target.read_bytes()
     except OSError:
-        return {}, []
+        return {}, [], True
     try:
         parsed = tomllib.loads(raw.decode("utf-8"))
     except (UnicodeDecodeError, tomllib.TOMLDecodeError) as exc:
-        return {}, [f"{target} is not valid TOML and was ignored: {exc}"]
+        return {}, [f"{target} is not valid TOML and was ignored: {exc}"], False
     values: dict[str, Any] = {}
     warnings: list[str] = []
     for key, value in parsed.items():
@@ -140,6 +152,12 @@ def read_file(path: Path | None = None) -> tuple[dict[str, Any], list[str]]:
             warnings.append(f"{target}: {problem}")
             continue
         values[key] = coerced
+    return values, warnings, True
+
+
+def read_file(path: Path | None = None) -> tuple[dict[str, Any], list[str]]:
+    """A missing file is normal; a broken one names the problem and contributes nothing."""
+    values, warnings, _ = _read(path)
     return values, warnings
 
 
@@ -215,13 +233,36 @@ def apply(settings: Settings) -> None:
     set_role_tag(HEAVY_ALIAS, str(settings.values["heavy_model"]))
 
 
+# What a TOML basic string may not carry literally. Without these, one newline in a value
+# wrote a file that would not parse, and the next write then read it as empty and
+# replaced every other setting with nothing.
+TOML_ESCAPES = {
+    "\\": "\\\\",
+    '"': '\\"',
+    "\n": "\\n",
+    "\r": "\\r",
+    "\t": "\\t",
+    "\b": "\\b",
+    "\f": "\\f",
+}
+
+
 def _as_toml(value: Any) -> str:
     if isinstance(value, bool):
         return "true" if value else "false"
     if isinstance(value, int):
         return str(value)
-    escaped = str(value).replace("\\", "\\\\").replace('"', '\\"')
-    return f'"{escaped}"'
+    out = []
+    for char in str(value):
+        if char in TOML_ESCAPES:
+            out.append(TOML_ESCAPES[char])
+        elif char < " " or char == chr(127):
+            # Every other control character, which TOML spells as a short unicode escape.
+            out.append(f"\\u{ord(char):04X}")
+        else:
+            out.append(char)
+    joined = "".join(out)
+    return f'"{joined}"'
 
 
 def write_file(values: dict[str, Any], path: Path | None = None) -> Path:
@@ -243,8 +284,14 @@ def set_value(key: str, raw: str, path: Path | None = None) -> tuple[Any, list[s
     value, problem = coerce_text(key, raw)
     if problem:
         raise ValueError(problem)
-    # A rewrite drops what read_file could not parse, so those warnings must reach the caller.
-    stored, dropped = read_file(path)
+    # A rewrite drops what could not be parsed, so those warnings must reach the caller.
+    stored, dropped, parsed = _read(path)
+    if not parsed:
+        raise UnreadableConfigError(
+            f"{config_path() if path is None else path} is not valid TOML. Writing would "
+            "replace every setting in it with this one, so nothing was written. Fix the "
+            "file or delete it to start from the defaults."
+        )
     stored[key] = value
     write_file(stored, path)
     return value, dropped + _advice(load(path=path).values)
@@ -254,7 +301,12 @@ def unset_value(key: str, path: Path | None = None) -> tuple[bool, list[str]]:
     """Reverts one key to the built-in default by removing it, not by writing the default in."""
     if key not in DEFAULTS:
         raise KeyError(key)
-    stored, dropped = read_file(path)
+    stored, dropped, parsed = _read(path)
+    if not parsed:
+        raise UnreadableConfigError(
+            f"{config_path() if path is None else path} is not valid TOML, so removing one "
+            "key would delete the rest. Nothing was written."
+        )
     if key not in stored:
         return False, dropped
     del stored[key]
