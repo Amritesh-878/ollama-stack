@@ -4,9 +4,26 @@ from __future__ import annotations
 
 import subprocess
 import sys
+import tempfile
 from dataclasses import dataclass
+from pathlib import Path
 
 from ollama_stack.binaries import on_path
+
+
+def cat_for(platform: str) -> str:
+    """`type` is Windows. Elsewhere it prints command definitions, so the lesson taught
+    something that fails on every machine that read it. A function, not an expression, so
+    the other platform is testable from this one.
+    """
+    return "type" if platform == "win32" else "cat"
+
+
+CAT = cat_for(sys.platform)
+# A real path, not a bare name in whatever directory this was started from. The command
+# printed above the step has to be one the reader can retype, and writing into their
+# working directory to achieve that is a side effect a tutorial has no business having.
+SAMPLE_PATH = Path(tempfile.gettempdir()) / "ollama-stack-tutorial" / "sample.py"
 
 SAMPLE = '''def total(items):
     """Sum the prices, skipping anything that has been refunded."""
@@ -28,6 +45,10 @@ class Lesson:
     argv: list[str]
     teaches: str
     stdin: str | None = None
+    # Written into the working directory before the step runs, so the command printed
+    # above it is one the user can actually retype. C7 showed a pipe from a file that
+    # was never created, using a command that only exists on Windows.
+    creates: tuple[str, str] | None = None
 
 
 LESSONS: tuple[Lesson, ...] = (
@@ -73,11 +94,12 @@ LESSONS: tuple[Lesson, ...] = (
     ),
     Lesson(
         "C7",
-        "type sample.py | o explain this",
+        f"{CAT} {SAMPLE_PATH} | o explain this",
         ["explain", "this"],
         "Anything you pipe in becomes context for the question. This demo file is deliberately "
         "tiny - large files are still refused, and raising --num-ctx is the workaround.",
         SAMPLE,
+        (str(SAMPLE_PATH), SAMPLE),
     ),
     Lesson(
         "C8",
@@ -126,6 +148,18 @@ def listing() -> int:
 
 def execute(lesson: Lesson) -> bool:
     """A step that fails is still a lesson, so this reports and the caller keeps going."""
+    if lesson.creates is not None:
+        name, body = lesson.creates
+        target = Path(name)
+        # Never overwritten: a file already at that path is the user's, not ours.
+        if not target.exists():
+            try:
+                target.parent.mkdir(parents=True, exist_ok=True)
+                target.write_text(body, encoding="utf-8")
+                say(f"  wrote {target} so the command above is one you can retype. "
+                    "Delete it whenever.")
+            except OSError as exc:
+                say(f"  could not write {target}: {exc}. Piping the file in anyway.")
     command = launcher() + lesson.argv
     try:
         done = subprocess.run(

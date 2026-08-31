@@ -219,6 +219,9 @@ def config_set(key: str, value: str) -> None:
     except ValueError as exc:
         typer.secho(f"error: {exc}", fg=typer.colors.RED, err=True)
         raise typer.Exit(2) from None
+    except config.UnreadableConfigError as exc:
+        typer.secho(f"error: {exc}", fg=typer.colors.RED, err=True)
+        raise typer.Exit(2) from None
     except OSError as exc:
         typer.secho(f"error: writing {config.config_path()}: {exc}", fg=typer.colors.RED, err=True)
         raise typer.Exit(1) from None
@@ -234,6 +237,9 @@ def config_unset(key: str) -> None:
         removed, dropped = config.unset_value(key)
     except KeyError:
         typer.secho(f"error: unknown key {key!r}", fg=typer.colors.RED, err=True)
+        raise typer.Exit(2) from None
+    except config.UnreadableConfigError as exc:
+        typer.secho(f"error: {exc}", fg=typer.colors.RED, err=True)
         raise typer.Exit(2) from None
     except OSError as exc:
         typer.secho(f"error: writing {config.config_path()}: {exc}", fg=typer.colors.RED, err=True)

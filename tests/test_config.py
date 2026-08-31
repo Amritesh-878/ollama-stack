@@ -252,3 +252,56 @@ def test_the_config_file_is_not_in_the_repo() -> None:
     assert "ollama-stack" in location
     assert "site-packages" not in location
     assert os.name != "nt" or "AppData" in location
+
+
+def test_a_newline_in_a_value_survives_the_round_trip(tmp_path: Path) -> None:
+    """One newline used to write a file that would not parse, and the next write wiped it."""
+    target = tmp_path / "config.toml"
+    config.set_value("host", "http://x" + chr(10) + "y", target)
+    values, warnings = config.read_file(target)
+    assert warnings == []
+    assert values["host"] == "http://x" + chr(10) + "y"
+
+
+def test_every_control_character_survives_the_round_trip(tmp_path: Path) -> None:
+    target = tmp_path / "config.toml"
+    nasty = "a" + chr(9) + chr(13) + chr(10) + chr(0) + chr(27) + chr(127)
+    nasty += 'q"' + chr(92) + "z"
+    config.set_value("fast_model", nasty, target)
+    values, warnings = config.read_file(target)
+    assert warnings == []
+    assert values["fast_model"] == nasty
+
+
+def test_a_write_never_replaces_a_file_it_could_not_parse(tmp_path: Path) -> None:
+    """Reading an unparseable file as empty is what deleted every other setting."""
+    target = tmp_path / "config.toml"
+    broken = 'host = "http://a"' + chr(10) + "num_ctx = 16384" + chr(10) + "not toml [[[" + chr(10)
+    target.write_text(broken, encoding="utf-8")
+    with pytest.raises(config.UnreadableConfigError):
+        config.set_value("num_ctx", "32768", target)
+    assert target.read_text(encoding="utf-8") == broken
+
+
+def test_unsetting_a_key_never_replaces_a_file_it_could_not_parse(tmp_path: Path) -> None:
+    target = tmp_path / "config.toml"
+    broken = "not toml [[[" + chr(10)
+    target.write_text(broken, encoding="utf-8")
+    with pytest.raises(config.UnreadableConfigError):
+        config.unset_value("num_ctx", target)
+    assert target.read_text(encoding="utf-8") == broken
+
+
+def test_a_string_key_given_a_number_or_a_list_is_named_not_stringified(tmp_path: Path) -> None:
+    """str() turned `host = 123` into "123", so the connection failed with nothing to point at."""
+    target = tmp_path / "config.toml"
+    target.write_text(
+        "host = 123" + chr(10) + "fast_model = [1, 2]" + chr(10)
+        + "search_provider = 3.14" + chr(10),
+        encoding="utf-8",
+    )
+    values, warnings = config.read_file(target)
+    assert values == {}
+    assert len(warnings) == 3
+    for key in ("host", "fast_model", "search_provider"):
+        assert any(key in warning and "wants text" in warning for warning in warnings), key

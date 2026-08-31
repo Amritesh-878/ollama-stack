@@ -12,7 +12,7 @@ from typing import Any
 import pytest
 import responses
 
-from ollama_stack.__main__ import RESERVED, _parse, _utf8, main
+from ollama_stack.__main__ import RESERVED, UsageError, _parse, _utf8, main
 from ollama_stack.cli import app
 from ollama_stack.models import FAST_ALIAS, HEAVY_ALIAS, REGISTRY
 
@@ -556,3 +556,15 @@ def test_ask_without_a_web_flag_leaves_the_choice_to_the_model(
 
 def test_ask_no_web_still_withholds_the_tool(monkeypatch: pytest.MonkeyPatch) -> None:
     assert _ask_web(["ask", "--no-web", "who won"], monkeypatch) is False
+
+
+def test_a_superscript_digit_is_a_usage_error_not_a_traceback() -> None:
+    """isdigit() says yes and int() then raises, so the two must never be used together."""
+    for raw in ("²", "②", "1.5", "-4", "0", "nine"):
+        with pytest.raises(UsageError):
+            _parse(["--num-ctx", raw, "hello"])
+
+
+def test_a_plain_number_still_sets_the_window() -> None:
+    opts, words = _parse(["--num-ctx", "16384", "hello"])
+    assert (opts.num_ctx, words) == (16384, ["hello"])

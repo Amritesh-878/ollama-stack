@@ -11,6 +11,7 @@ from pathlib import Path
 import pytest
 
 from ollama_stack import config, setup
+from ollama_stack.client import OllamaError
 from ollama_stack.hardware import Gpu, Model
 from ollama_stack.setup import Answers, MissingAnswerError, Report
 from ollama_stack.setup import verify as real_verify
@@ -22,6 +23,9 @@ FULL = Answers(
     install=False,
     pull=False,
 )
+
+
+REAL_VERIFY = setup.verify
 
 
 @pytest.fixture(autouse=True)
@@ -358,3 +362,69 @@ def test_the_venv_copy_of_o_does_not_count_as_being_on_path(
     monkeypatch.setattr(sys, "prefix", str(tmp_path))
     monkeypatch.setenv("PATH", str(scripts))
     assert setup.resolve_on_path() is None
+
+
+class _PinRecorder:
+    """Records the calls, because the defect was an unload that never happened."""
+
+    def __init__(self, fail_on: str) -> None:
+        self.calls: list[str] = []
+        self.fail_on = fail_on
+
+    def load(self, tag: str) -> None:
+        self.calls.append("load")
+        if self.fail_on == "load":
+            raise OllamaError("could not load")
+
+    def generate(self, prompt: str, tag: str) -> object:
+        self.calls.append("generate")
+        raise OllamaError("runner died after the weights loaded")
+
+    def unload(self, tag: str) -> None:
+        self.calls.append("unload")
+
+
+def test_a_failed_generate_still_releases_the_card() -> None:
+    """load() pins with keep_alive -1, so an early return held the whole card until reboot."""
+    client = _PinRecorder(fail_on="generate")
+    report = Report()
+    REAL_VERIFY(client, "qwen3.5:4b", report)  # type: ignore[arg-type]
+    assert client.calls == ["load", "generate", "unload"]
+    assert report.model_unusable
+
+
+def test_a_load_that_never_succeeded_is_not_unloaded() -> None:
+    client = _PinRecorder(fail_on="load")
+    REAL_VERIFY(client, "qwen3.5:4b", Report())  # type: ignore[arg-type]
+    assert client.calls == ["load"]
+
+
+def test_a_model_that_will_not_load_makes_setup_fail_rather_than_say_done() -> None:
+    """A typo in --fast-model wrote the config, printed Setup done, and exited 0."""
+    report = Report()
+    report.add("write config", True)
+    report.add("verify", False, "model 'totally/bogus:tag' not found")
+    assert report.model_unusable
+
+
+def test_a_failed_pull_alone_is_not_treated_as_an_unusable_model() -> None:
+    """A pull can fail and the tool still work, which is why the signal is verify, not failures."""
+    report = Report()
+    report.add("pull qwen3.5:4b", False, "network")
+    assert report.failures
+    assert not report.model_unusable
+
+
+def test_a_superscript_digit_in_the_menu_falls_back_instead_of_raising(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """"²".isdigit() is True and int() then raises, which put a traceback mid-wizard."""
+    options = ["alpha", "beta"]
+    for raw in ("²", "②", "", "nine", "0", "99"):
+        monkeypatch.setattr("builtins.input", lambda _prompt="", value=raw: value)
+        assert setup._numbered("pick", options, "beta") == "beta", raw
+
+
+def test_a_plain_number_in_the_menu_still_chooses(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr("builtins.input", lambda _prompt="": "1")
+    assert setup._numbered("pick", ["alpha", "beta"], "beta") == "alpha"

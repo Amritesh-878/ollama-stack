@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import os
 import platform
 import subprocess
@@ -74,6 +75,11 @@ class Report:
     def failures(self) -> list[Step]:
         return [step for step in self.steps if not step.ok]
 
+    @property
+    def model_unusable(self) -> bool:
+        """A failed verify is not one imperfect step: the tool cannot answer at all."""
+        return any(step.name == "verify" and not step.ok for step in self.steps)
+
 
 def ascii_only() -> bool:
     """cmd.exe is cp1252 and renders box drawing as T, | and o, so ask before drawing any."""
@@ -126,9 +132,15 @@ def _numbered(question: str, options: list[str], default: str) -> str:
     for index, option in enumerate(options, 1):
         say(f"  {index}) {option}")
     raw = input(f"Number [{options.index(default) + 1}]: ").strip()
-    if not raw.isdigit() or not 1 <= int(raw) <= len(options):
+    # int(), not isdigit(): "²".isdigit() is True and int() then raises, which put a
+    # traceback in the middle of the wizard.
+    try:
+        chosen = int(raw)
+    except ValueError:
         return default
-    return options[int(raw) - 1]
+    if not 1 <= chosen <= len(options):
+        return default
+    return options[chosen - 1]
 
 
 def ollama_binary() -> str | None:
@@ -269,14 +281,17 @@ def verify(client: OllamaClient, tag: str, report: Report) -> None:
         return
     cold = time.perf_counter() - started
     started = time.perf_counter()
+    # In a finally: load() pins with keep_alive -1, which never expires, so an early return
+    # on a failed generate left the whole card held. Runners do die after the weights load.
     try:
         reply = client.generate(VERIFY_PROMPT, tag)
+        warm = time.perf_counter() - started
     except OllamaError as exc:
         report.add("verify", False, str(exc))
         return
-    warm = time.perf_counter() - started
-    # Released again: a pin never expires, and setup must not leave the card held silently.
-    client.unload(tag)
+    finally:
+        with contextlib.suppress(OllamaError):
+            client.unload(tag)
     measured = f"cold load {cold:.1f}s, warm reply {warm:.2f}s"
     # A rate off a handful of tokens is fixed cost, not throughput, and reads as a broken machine.
     if reply.eval_count >= RATE_FLOOR and warm > 0:
@@ -348,6 +363,11 @@ def closing(report: Report, settings_num_ctx: int) -> None:
     say()
     if report.failures:
         say(f"{len(report.failures)} step(s) did not complete. Everything else is ready.")
+        say()
+    if report.model_unusable:
+        say("The model in your config could not be loaded, so `o` will not answer yet.")
+        say("Check the tag with `o config`, then `o setup` again or `o config set "
+            "fast_model <tag>`.")
         say()
     if not report.o_on_path:
         # `o` exists only inside .venv here, so `uv run` is the only spelling that works.
@@ -429,4 +449,6 @@ def run(answers: Answers) -> int:
         report.add("global install", True, "declined; `uv run o` works from the repo")
 
     closing(report, settings.num_ctx)
-    return 0
+    # Non-zero when the model will not load. A wizard that says "done" and exits 0 over a
+    # config pointing at a tag that does not exist is the worst of both.
+    return 1 if report.model_unusable else 0
