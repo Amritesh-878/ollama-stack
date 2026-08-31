@@ -10,6 +10,7 @@ import sys
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Any
 
 from ollama_stack import config
 from ollama_stack.binaries import on_path
@@ -270,6 +271,17 @@ def write_config(fast: str, heavy: str | None, provider: str | None, report: Rep
     report.add("write config", True, str(config.config_path()))
 
 
+def restore(previous: dict[str, Any], report: Report) -> None:
+    """Put back what was in the file, so a failed setup does not break a working install."""
+    try:
+        config.write_file(previous)
+    except OSError as exc:
+        report.add("restore config", False, str(exc))
+        return
+    kept = ", ".join(sorted(previous)) if previous else "the built-in defaults"
+    report.add("restore config", True, f"model did not load, so config is back to {kept}")
+
+
 def verify(client: OllamaClient, tag: str, report: Report) -> None:
     """Their cold load and their warm reply, because every figure we publish is from one laptop."""
     say(f"  loading {tag} ...")
@@ -365,9 +377,8 @@ def closing(report: Report, settings_num_ctx: int) -> None:
         say(f"{len(report.failures)} step(s) did not complete. Everything else is ready.")
         say()
     if report.model_unusable:
-        say("The model in your config could not be loaded, so `o` will not answer yet.")
-        say("Check the tag with `o config`, then `o setup` again or `o config set "
-            "fast_model <tag>`.")
+        say("That model could not be loaded, so it was NOT saved. Your config is unchanged.")
+        say("Check the tag with `o models`, then run `o setup` again.")
         say()
     if not report.o_on_path:
         # `o` exists only inside .venv here, so `uv run` is the only spelling that works.
@@ -433,11 +444,19 @@ def run(answers: Answers) -> int:
         report.add("pull", False, f"skipped by --no-pull: {', '.join(m.tag for m in pending)}")
 
     provider = answers.search_provider
+    # Kept so a model that will not load can be put back. Exiting non-zero over a config
+    # naming a broken tag still leaves every later command failing; this leaves the tool
+    # working on whatever was there before.
+    previous, _ = config.read_file()
     write_config(fast, heavy, provider, report)
 
     settings = config.load()
     config.apply(settings)
     verify(client, fast, report)
+    if report.model_unusable:
+        restore(previous, report)
+        settings = config.load()
+        config.apply(settings)
 
     install = answers.install
     if install is None and interactive():
