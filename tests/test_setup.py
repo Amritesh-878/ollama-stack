@@ -428,3 +428,50 @@ def test_a_superscript_digit_in_the_menu_falls_back_instead_of_raising(
 def test_a_plain_number_in_the_menu_still_chooses(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr("builtins.input", lambda _prompt="": "1")
     assert setup._numbered("pick", ["alpha", "beta"], "beta") == "alpha"
+
+
+def _fail_verify(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        setup, "verify", lambda client, tag, report: report.add("verify", False, "not found")
+    )
+
+
+def test_a_model_that_will_not_load_is_not_left_in_the_config(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Exiting non-zero over a config naming a broken tag still breaks every later command."""
+    config.set_value("fast_model", "qwen3.5:4b")
+    config.set_value("num_ctx", "16384")
+    _fail_verify(monkeypatch)
+    code = setup.run(
+        Answers(fast_model="totally/bogus:tag", heavy_model="none", install=False, pull=False)
+    )
+    assert code == 1
+    stored, _ = config.read_file()
+    assert stored["fast_model"] == "qwen3.5:4b"
+    # Untouched by setup either way, so its survival proves the whole file came back.
+    assert stored["num_ctx"] == 16384
+
+
+def test_a_failed_first_run_leaves_the_defaults_rather_than_a_broken_tag(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Nothing was configured before, so there is nothing to put back and that must be fine."""
+    _fail_verify(monkeypatch)
+    code = setup.run(
+        Answers(fast_model="totally/bogus:tag", heavy_model="none", install=False, pull=False)
+    )
+    assert code == 1
+    stored, _ = config.read_file()
+    assert "fast_model" not in stored
+    assert config.load().values["fast_model"] == config.DEFAULTS["fast_model"]
+
+
+def test_a_model_that_loads_is_kept(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The rollback must not fire on success, or setup would never configure anything."""
+    code = setup.run(
+        Answers(fast_model="qwen3.5:4b", heavy_model="none", install=False, pull=False)
+    )
+    assert code == 0
+    stored, _ = config.read_file()
+    assert stored["fast_model"] == "qwen3.5:4b"
